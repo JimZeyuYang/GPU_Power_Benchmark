@@ -2,12 +2,14 @@
 INC	:= -I$(CUDA_HOME)/include -I.
 LIB	:= -L$(CUDA_HOME)/lib64 -lcudart -lcublas
 
-NVCCFLAGS	:= -lineinfo -arch=sm_80 --ptxas-options=-v --use_fast_math
+NVCCFLAGS	:= -lineinfo --ptxas-options=-v --use_fast_math
 
-both:		benchmark
+BINDIR	:= ../bin
 
-benchmark:	benchmark.cpp Makefile
-		g++ benchmark.cpp -o benchmark $(INC) $(LIB)
+all:	$(BINDIR)/benchmark_load
+
+$(BINDIR)/benchmark_load:	benchmark_load.cu Makefile
+		nvcc benchmark_load.cu -o $(BINDIR)/benchmark_load $(INC) $(NVCCFLAGS) $(LIB)
 
 clean:
-		rm -f benchmark
+		rm -f $(BINDIR)/benchmark_load
