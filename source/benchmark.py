@@ -8,10 +8,14 @@ import statistics
 from functools import partial
 import time
 import random
+import os
+from multiprocessing import Pool
 
+q
 # Steps
 # -. Fix GPU core and mem clock
 # -. Recompile code in case of changes
+# -. Warn up GPU
 # 0. Find the GPU power update frequency using sinewave load
 # 1. Find the scale parameter
 # 2. Find the power consumption duing load and idle
@@ -19,298 +23,480 @@ import random
 # 4. estimate the average window by optimization
 # 5. Plot the results and summarize the statistics
 
-# 25 50 75 100 125 150 175 200
-# 35 70
+class GPU_pwr_benchmark:
+    def __init__(self, verbose=False):
+        print('Initializing benchmark...')
+        self.verbose = verbose
+        self.BST = True
+        self.repetitions = 64
 
-def main():
-    # recomplie_load()
-    # scale_param = find_scale_parameter()
-    scale_param = 1375
-    random_sleep()
-    # find_idle_load_pwr(scale_param)
+        self._recompile_load()
+        self.gpu_name = self._get_gpu_name()
 
-    '''
-    find_pwr_update_freq(scale_param)
-    # measure how long this takes
-    start = time.time()
+        run = 0
+        while os.path.exists(os.path.join('results', f'{self.gpu_name}_run_#{run}')): run += 1
+        self.result_dir = os.path.join('results', f'{self.gpu_name}_run_#{run}')
+        os.makedirs(self.result_dir)
+
+        self.scale_gradient, self.scale_intercept = 1375, -1500
+        self.pwr_update_freq = 100
+        self.idle_pwr, self.load_pwr = 77, 208
+
+        self.aliasing_ratios = [1/3, 2/3, 3/4, 1, 5/4, 4/3, 3/2]
+        # 100ms: 50    67   75   100  125  133  150
+        # 20ms:  10    13   15   20   25   27   30
+
+        self._print_general_info()
+
+
+    def prepare_experiment(self):
+        print('Preparing for experiment...    ')
+        self._warm_up()
+        self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
+        self.pwr_update_freq = self._find_pwr_update_freq()
+        self.idle_pwr, self.load_pwr = self._find_idle_load_pwr()
+
+    def _print_general_info(self):
+        time_ = 'Date and time:        ' + time.strftime('%d/%m/%Y %H:%M:%S')
+        gpu =   'Benchmarking on GPU:  ' + self.gpu_name
+        host =  'Host machine:         ' + os.uname()[1]
+
+        max_len = max(len(time_), len(gpu), len(host))
+        print('+', '-'*(max_len), '+')
+        print('|', time_ + ' '*(max_len - len(time_)), '|')
+        print('|', gpu + ' '*(max_len - len(gpu)), '|')
+        print('|', host + ' '*(max_len - len(host)), '|')
+        print('+', '-'*(max_len), '+')
+
+    def _recompile_load(self):
+        print('Recompiling benchmark load...')
+        subprocess.call(['make', '-C', 'source/'])
+        print()
+
+    def _get_gpu_name(self):
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv'], stdout=subprocess.PIPE)
+        output = result.stdout.decode().split('\n')
+        gpu_name = output[1]
+        gpu_name = gpu_name.replace(' ', '_')
+
+        return gpu_name
     
-    window_size = 35
-    repetetion = 2000 / window_size
-    subprocess.call(['./source/run_benchmark.sh', str(window_size), str(window_size*scale_param), '50'])
-    time.sleep(1)
-    process_results('A100', window_size)
-
-    end = time.time()
-    print(f'Time taken: {end - start}')
-
-    '''
-
-def process_results(gpu_name, window_size):
-    load = pd.read_csv('results/timestamps.csv')
-    load.loc[-1] = load.loc[0] - 500000
-    load.index = load.index + 1
-    load = load.sort_index()
-    load['activity'] = (load.index / 2).astype(int) % 2
-    load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
-    t0 = load['timestamp'][0]
-    load['timestamp'] -= t0
-    load.loc[load.index[-1], 'timestamp'] += 500 # NEED TO TAKE A LOOK AT THIS
-    load.loc[load.index[-1], 'activity'] = 0
-
-    power = pd.read_csv('results/gpudata.csv')
-    power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-    power['timestamp'] -= 60*60*1000
-    power['timestamp'] -= t0
-    power = power[power['timestamp'] >= 0]
-
-
-
-    loss_func = partial(reconstr_loss, load, power, lowP=75, highP=200)
-    history_length = gradient_descent(loss_func, 50)
-    print(f'History length: {history_length}')
-
-    reconstructed = reconstruction(load, power, history_length, 75, 200)
-    plot_reconstr_result(gpu_name, window_size, load, power, reconstructed)
-
-
-def gradient_descent(loss, x_init, lr=0.15, dx=0.02, error=1e-3, max_iter=10):
-    x = x_init
-    x_track = [x]
-    loss_track = [loss(x)]
-    for i in range(max_iter):
-        dy = (loss(x + dx) - loss(x)) / dx
-        x -= lr * dy
-
-        print(f'Iteration {i}: x = {x}, loss = {loss(x)}')
-        x_track.append(x)
-        loss_track.append(loss(x))
-
-        if np.abs(loss(x + dx) - loss(x)) < error:
-            break
+    def _benchload(self, load_pd, test_duration, store_path, delay=True):
+        repetitions = str(int(test_duration / load_pd))
+        niters = str(int(load_pd * self.scale_gradient + self.scale_intercept))
+        subprocess.call(['./source/run_benchmark.sh', str(load_pd), niters, repetitions, store_path])
+        if delay:  time.sleep(1)
     
-    return x_track[np.argmin(loss_track)]
+    def _random_sleep(self):
+        time.sleep(random.random())
 
-def reconstr_loss(load, power, history_length, lowP, highP, loss_type='MSE'):
-    reconstructed = reconstruction(load, power, history_length, lowP, highP)
+    def _warm_up(self):
+        print('  Warming up GPU...                    ', end='', flush=True)
+        store_path = os.path.join(self.result_dir, 'warm_up')
+        os.makedirs(store_path)
+        for i in range(5):  self._benchload(100, 5000, store_path)
+        print('done')
 
-    if loss_type == 'MSE':
-        return np.mean((power[' power.draw [W]'] - reconstructed[' power.draw [W]'])**2)
-    elif loss_type == 'MAE':
-        return np.mean(np.abs(power[' power.draw [W]'] - reconstructed[' power.draw [W]']))
-    elif loss_type == 'EMSE':
-        return np.sqrt(np.mean((power[' power.draw [W]'] - reconstructed[' power.draw [W]'])**2))
-    else:
-        raise Exception('Invalid loss type')
+    def _f_duration(self, niter, store_path):
+        subprocess.call(['./source/run_benchmark.sh', '50', str(niter), '30', store_path])
+        
+        df = pd.read_csv(os.path.join(store_path, 'timestamps.csv'))
+        df = df.drop_duplicates(subset=['timestamp'])
+        df.reset_index(drop=True, inplace=True)
+        df['diff'] = df['timestamp'].diff()
+        df = df.iloc[1::2]
+        df = df.iloc[10:]
+        avg = df['diff'].mean()
 
-def reconstruction(load, power, history_length, lowP, highP):
-    # copy the power df
-    reconstructed = power.copy()
-    load['power_draw'] = load['activity'].apply(lambda x: lowP if x == 0 else highP)
-    pwr_track = reconstructed[' power.draw [W]'].iloc[0]
-    reconstr_pwr = lowP
-    for index, row in reconstructed.iterrows():
-        if row['timestamp'] <= 500:
-            reconstructed.loc[index, ' power.draw [W]'] = lowP
-        else:
-            if row[' power.draw [W]'] != pwr_track:
-                pwr_track = row[' power.draw [W]']
+        return avg / 1000
 
-                # find rows in load df that are within the past history_length of the current timestamp
-                load_window = load[(load['timestamp'] >= row['timestamp'] - history_length) 
-                            & (load['timestamp'] < row['timestamp'])].copy()
+    def _linear_regression(self, x, y):
+        X = np.column_stack((np.ones(len(x)), x))
+        coefficents = np.linalg.inv(X.T @ X) @ X.T @ y
 
-                # interpolate the lower bound of the load window
-                lb_t = row['timestamp'] - history_length
-                lb_0 = load[load['timestamp'] < lb_t].iloc[-1]
-                lb_1 = load[load['timestamp'] > lb_t].iloc[0]
-                gradient = (lb_1['power_draw'] - lb_0['power_draw']) / (lb_1['timestamp'] - lb_0['timestamp'])
-                lb_p = lb_0['power_draw'] + gradient * (lb_t - lb_0['timestamp'])
+        intercept = coefficents[0]
+        gradient = coefficents[1]
+        return intercept, gradient
 
-                # interpolate the upper bound of the load window
-                ub_t = row['timestamp']
-                ub_0 = load[load['timestamp'] < ub_t].iloc[-1]
-                ub_1 = load[load['timestamp'] > ub_t].iloc[0]
-                gradient = (ub_1['power_draw'] - ub_0['power_draw']) / (ub_1['timestamp'] - ub_0['timestamp'])
-                ub_p = ub_0['power_draw'] + gradient * (ub_t - ub_0['timestamp'])
+    def _find_scale_parameter(self):
+        print('  Finding scale parameter...       ', end='', flush=True)
+
+        store_path = os.path.join(self.result_dir, 'find_scale_param')
+        os.makedirs(store_path)
+
+        niter = 1000
+        duration = 0
+
+        duration_list = []
+        niter_list = []
+
+        while duration < 200:
+            if self.verbose: print(f'    {duration:.2f} ms')
+            duration = self._f_duration(niter, store_path)
+            if duration > 2:
+                duration_list.append(duration)
+                niter_list.append(niter)
+            niter = int(niter * 1.5)
+
+
+        # Linear regression
+        intercept, gradient = self._linear_regression(duration_list, niter_list)
+        print(f'{gradient:.2f} {intercept:.2f}')
+
+
+        # plot niter vs duration
+        fig, ax = plt.subplots(nrows=1, ncols=1)
+        ax.plot(duration_list, niter_list, 'o')
+        # plot a line with gradient and intercept
+        x = np.linspace(0, duration_list[-1], 100)
+        y = gradient * x + intercept
+        ax.plot(x, y, '--')
+        ax.set_xlabel('Duration (ms)')
+        ax.set_ylabel('Number of iterations')
+        ax.set_title('Number of benchload iterations vs duration')
+        ax.grid(True, linestyle='--', linewidth=0.5)
+
+        plt.savefig(os.path.join(store_path, 'niter_vs_duration.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(store_path, 'niter_vs_duration.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
+
+        return gradient, intercept
+
+    def _find_idle_load_pwr(self):
+        print('  Finding idle and load power...       ', end='', flush=True)
+
+        store_path = os.path.join(self.result_dir, 'find_idle_load_pwr')
+        os.makedirs(store_path)
+
+        load_pwr_list = []
+        idle_pwr_list = []
+
+        # warm up
+        for i in range(3): self._benchload(2000, 2000, store_path)
+
+        # measure
+        for i in range(5):
+            self._benchload(2000, 2000, store_path)
+
+            load = pd.read_csv(os.path.join(store_path, 'timestamps.csv'))
+            load['activity'] = (load.index / 2).astype(int) % 2
+            load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
+
+            df = pd.read_csv(os.path.join(store_path, 'gpudata.csv'))
+            df['timestamp'] = (pd.to_datetime(df['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+            df['timestamp'] -= 60*60*1000
+
+            # find power during load
+            load_begin = load['timestamp'][1] + 500
+            load_end = load['timestamp'][2] - 500
+            load_window = df[(df['timestamp'] >= load_begin) & (df['timestamp'] <= load_end)]
+            load_pwr = load_window[' power.draw [W]'].mean()
+            load_pwr_list.append(load_pwr)
+
+            # find power during idle
+            idle_begin = load['timestamp'][3] + 500
+            idle_end = load['timestamp'][4] - 500
+            idle_window = df[(df['timestamp'] >= idle_begin) & (df['timestamp'] <= idle_end)]
+            idle_pwr = idle_window[' power.draw [W]'].mean()
+            idle_pwr_list.append(idle_pwr)
+
+            if self.verbose:
+                print()
+                print(f'load power: {load_pwr}')
+                print(f'idle power: {idle_pwr}')
+        
+        avg_load_pwr = sum(load_pwr_list) / len(load_pwr_list)
+        avg_idle_pwr = sum(idle_pwr_list) / len(idle_pwr_list)
+        if self.verbose:
+            print(f'avg load power: {avg_load_pwr}')
+            print(f'avg idle power: {avg_idle_pwr}')
+
+        print(f'{avg_idle_pwr:.2f} W | {avg_load_pwr:.2f} W')
+        return avg_idle_pwr, avg_load_pwr
+
+    def _find_pwr_update_freq(self):
+        print('  Finding power update frequency...    ', end='', flush=True)
+        
+        store_path = os.path.join(self.result_dir, 'find_pwr_update_freq')
+        os.makedirs(store_path)
+
+        self._benchload(10, 1000, store_path)
+
+        df = pd.read_csv(os.path.join(store_path, 'gpudata.csv'))
+        df['timestamp'] = (pd.to_datetime(df['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+
+        period_list = []
+        last_pwr = df.iloc[0]
+        for index, row in df.iterrows():
+            if row[' power.draw [W]'] != last_pwr[' power.draw [W]']:
+                period_list.append(row['timestamp'] - last_pwr['timestamp'])
+                last_pwr = row
                 
-                # take the average of the load window
-                t = np.concatenate((np.array([lb_t]), load_window['timestamp'].to_numpy(), np.array([ub_t])))
-                p = np.concatenate((np.array([lb_p]), load_window['power_draw'].to_numpy(), np.array([ub_p])))
-                reconstr_pwr = np.trapz(p, t) / history_length
+        avg_period = sum(period_list) / len(period_list)
+        median_period = statistics.median(period_list)
+        std_period = statistics.stdev(period_list)
+
+        if self.verbose:
+            print()
+            print(f'avg period:    {avg_period:.2f} ms')
+            print(f'median period: {median_period:.2f} ms')
+            print(f'std period:    {std_period:.2f} ms')
+
+        # plot the period_list as histogram
+        fig, axis = plt.subplots(nrows=1, ncols=1)
+        axis.hist(period_list, bins=20)
+        axis.set_xlabel('Period (ms)')
+        axis.set_ylabel('Frequency')
+        axis.grid(True, linestyle='--', linewidth=0.5)
+
+        fig.set_size_inches(8, 6)
+        plt.savefig(os.path.join(store_path, 'power_update_freq.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(store_path, 'power_update_freq.svg'), format='svg', bbox_inches='tight')
+
+        plt.close('all')
+
+        print(f'{median_period:.2f} ms')
+        return median_period
+
+    def run_experiment(self):
+        for ratio in self.aliasing_ratios:
+            load_pd = int(ratio * self.pwr_update_freq)
+            print(f'Running experiment with load period of {load_pd} ms...')
+            # create the store path
+            ratio_store_path = os.path.join(self.result_dir, f'load_{load_pd}_ms')    
+            os.makedirs(ratio_store_path)
+                        
+            for rep in range(self.repetitions):
+                print(f'  Repetition {rep+1} of {self.repetitions}...    ')
+                rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
+                os.makedirs(rep_store_path)
+                self._random_sleep()
+                self._benchload(load_pd, 4000, rep_store_path, delay=False)
             
-            reconstructed.loc[index, ' power.draw [W]'] = reconstr_pwr
+    def process_results(self):
+        print('Processing results...')
 
-    return reconstructed
+        results = []
+        labels = []
 
-def plot_reconstr_result(gpu_name, window_size, load, power, reconstructed):
-    # Plot the results
-    fig, axis = plt.subplots(nrows=3, ncols=1)
+        for ratio in self.aliasing_ratios:
+            load_pd = int(ratio * self.pwr_update_freq)
+            print(f'  Processing results for load period of {load_pd} ms...')
+            ratio_store_path = os.path.join(self.result_dir, f'load_{load_pd}_ms')
+            labels.append(f'{load_pd}')
 
-    axis[0].plot(load['timestamp'], load['activity']*100, label='load')
-    axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
-    axis[0].set_xlabel('Time (ms)')
-    axis[0].set_ylabel('Load')
-    axis[0].grid(True, linestyle='--', linewidth=0.5)
-    axis[0].set_xlim(0, load['timestamp'].max())
-    axis[0].legend()
-    axis[0].set_title(f'{gpu_name} - {window_size} ms load window')
-    
-    axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
-    axis[1].set_xlabel('Time (ms)')
-    axis[1].set_ylabel('Power [W]')
-    axis[1].grid(True, linestyle='--', linewidth=0.5)
-    axis[1].set_xlim(axis[0].get_xlim())
+            args = []
 
-    axis[2].plot(reconstructed['timestamp'], reconstructed[' power.draw [W]'], label='reconstructed')
-    axis[2].set_xlabel('Time (ms)')
-    axis[2].set_ylabel('Power [W]')
-    axis[2].grid(True, linestyle='--', linewidth=0.5)
-    axis[2].set_xlim(axis[0].get_xlim())
+            for rep in range(self.repetitions):
+                rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
+                args.append((rep_store_path, load_pd))
 
-    fig.set_size_inches(20, 12)
-    plt.savefig('results/result.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('results/result.svg', format='svg', bbox_inches='tight')
-    plt.close('all')
+            num_processes = min(self.repetitions, os.cpu_count())
+            pool = Pool(processes=num_processes)
+            ratio_results = pool.starmap(self._process_single_run, args)
+            pool.close()
+            pool.join()
 
-def get_gpu_name():
-    result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv'], stdout=subprocess.PIPE)
-    output = result.stdout.decode().split('\n')
-    gpu_name = output[1]
-    
-    return gpu_name
+            for result in ratio_results:
+                print(result)
+            results.append(ratio_results)
 
-def recomplie_load():
-    subprocess.call(['make', '-C', 'source/'])
+        # plot the results
+        fig, axis = plt.subplots(nrows=1, ncols=1)
+        self._violin_plot(axis, results, labels)
+        axis.set_xlabel('Load period (ms)')
+        axis.set_ylabel('History Length (ms)')
+        fig.set_size_inches(8, 6)
+        plt.savefig(os.path.join(self.result_dir, 'history_length.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(self.result_dir, 'history_length.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
 
-def find_scale_parameter():
-    niter = 1000
-    duration = 0
 
-    duration_list = []
-    niter_list = []
+    def _adjacent_values(self, vals, q1, q3):
+        upper_adjacent_value = q3 + (q3 - q1) * 1.5
+        upper_adjacent_value = np.clip(upper_adjacent_value, q3, vals[-1])
 
-    while duration < 200:
-        duration = f_duration(niter)
-        if duration > 1:
-            duration_list.append(duration)
-            niter_list.append(niter)
-        niter *= 2
+        lower_adjacent_value = q1 - (q3 - q1) * 1.5
+        lower_adjacent_value = np.clip(lower_adjacent_value, vals[0], q1)
+        return lower_adjacent_value, upper_adjacent_value
 
-    print(duration_list)
-    print(niter_list)
+    def _set_axis_style(self, ax, labels):
+        ax.get_xaxis().set_tick_params(direction='out')
+        ax.xaxis.set_ticks_position('bottom')
+        ax.set_xticks(np.arange(1, len(labels) + 1))
+        ax.set_xticklabels(labels, ha='right')
+        ax.set_xlim(0.25, len(labels) + 0.75)
 
-    gradient_list = []
-    for i in range(len(niter_list) - 1):
-        gradient_list.append((niter_list[i] - niter_list[i+1])/(duration_list[i] - duration_list[i+1]))
+    def _violin_plot(self, ax, data, labels):
+        parts = ax.violinplot(
+            data, showmeans=False, showmedians=False,
+            showextrema=False)
 
-    print(gradient_list)
-    # find average gradient
-    avg_gradient = sum(gradient_list) / len(gradient_list)
-    print(avg_gradient)
-    # find the x intercept using the middle date point
-    midpoint = int(len(duration_list)/2)
-    x_intercept = duration_list[midpoint] - niter_list[midpoint] / avg_gradient
-    print(x_intercept)
-    return avg_gradient
+        for pc in parts['bodies']:
+            pc.set_facecolor('#76b900')
+            pc.set_edgecolor('#76b900')
+            pc.set_alpha(1)
 
-def f_duration(niter):
-    subprocess.call(['./source/run_benchmark.sh', '100', str(niter), '30'])
+        percentiles = np.stack([np.percentile(row, [25, 50, 75]) for row in data], axis=0)
+        quartile1, medians, quartile3 = percentiles[:, 0], percentiles[:, 1], percentiles[:, 2]
 
-    df = pd.read_csv('results/timestamps.csv')
-    df = df.drop_duplicates(subset=['timestamp'])
-    df.reset_index(drop=True, inplace=True)
-    df['diff'] = df['timestamp'].diff()
-    df = df.iloc[1::2]
-    df = df.iloc[10:]
-    avg = df['diff'].mean()
+        whiskers = np.array([
+            self._adjacent_values(sorted_array, q1, q3)
+            for sorted_array, q1, q3 in zip(data, quartile1, quartile3)])
+        whiskersMin, whiskersMax = whiskers[:, 0], whiskers[:, 1]
 
-    return avg / 1000
+        inds = np.arange(1, len(medians) + 1)
+        ax.scatter(inds, medians, marker='o', color='white', s=2, zorder=3)
+        ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=1)
+        ax.vlines(inds, whiskersMin, whiskersMax, color='k', linestyle='-', lw=1)
 
-def find_idle_load_pwr(scale_param):
-    load_pwr_list = []
-    idle_pwr_list = []
+        self._set_axis_style(ax, labels)
+        ax.grid(True, linestyle='--', linewidth=0.5)
 
-    # warm up
-    for i in range(9): benchload(2000, scale_param, 2000)
 
-    # measure
-    for i in range(5):
-        benchload(2000, scale_param, 2000)
-
-        load = pd.read_csv('results/timestamps.csv')
+    def _process_single_run(self, result_dir, load_period):
+        load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
+        load.loc[-1] = load.loc[0] - 500000
+        load.index = load.index + 1
+        load = load.sort_index()
         load['activity'] = (load.index / 2).astype(int) % 2
         load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
+        t0 = load['timestamp'][0]
+        load['timestamp'] -= t0
+        load.loc[load.index[-1], 'timestamp'] += 500 # NEED TO TAKE A LOOK AT THIS
+        load.loc[load.index[-1], 'activity'] = 0
 
-        df = pd.read_csv('results/gpudata.csv')
-        df['timestamp'] = (pd.to_datetime(df['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-        df['timestamp'] -= 60*60*1000
+        power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
+        power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+        if self.BST:    power['timestamp'] -= 60*60*1000
+        power['timestamp'] -= t0
+        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
 
-        # find power during load
-        load_begin = load['timestamp'][1] + 500
-        load_end = load['timestamp'][2] - 500
-        load_window = df[(df['timestamp'] >= load_begin) & (df['timestamp'] <= load_end)]
-        load_pwr = load_window[' power.draw [W]'].mean()
-        load_pwr_list.append(load_pwr)
+        loss_func = partial(self._reconstr_loss, load, power)
+        history_length = self._gradient_descent(loss_func, self.pwr_update_freq/2, lr=load_period*5)
+        if self.verbose:    print(f'modeled history length: {history_length:.2f} ms')
 
-        # find power during idle
-        idle_begin = load['timestamp'][3] + 500
-        idle_end = load['timestamp'][4] - 500
-        idle_window = df[(df['timestamp'] >= idle_begin) & (df['timestamp'] <= idle_end)]
-        idle_pwr = idle_window[' power.draw [W]'].mean()
-        idle_pwr_list.append(idle_pwr)
-        print(f'load power: {load_pwr}')
-        print(f'idle power: {idle_pwr}')
-        print()
-    
-    avg_load_pwr = sum(load_pwr_list) / len(load_pwr_list)
-    avg_idle_pwr = sum(idle_pwr_list) / len(idle_pwr_list)
-    print(f'avg load power: {avg_load_pwr}')
-    print(f'avg idle power: {avg_idle_pwr}')
+        reconstructed = self._reconstruction(load, power, history_length)
+        self._plot_reconstr_result(load_period, load, power, history_length, reconstructed, result_dir)
 
-    return avg_idle_pwr, avg_load_pwr
+        return history_length
 
-def find_pwr_update_freq(scale_param):
-    benchload(10, scale_param, 1000)
-    df = pd.read_csv('results/gpudata.csv')
-    df['timestamp'] = (pd.to_datetime(df['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+    def _gradient_descent(self, loss, x_init, lr=200, dx=0.1, error=1e-6, max_iter=30):
+        x = x_init
+        x_track = [x]
+        loss_track = [loss(x)]
+        for i in range(max_iter):
+            dy = (loss(x + dx) - loss(x)) / dx
+            x -= lr * dy
 
-    period_list = []
-    last_pwr = df.iloc[0]
-    for index, row in df.iterrows():
-        if row[' power.draw [W]'] != last_pwr[' power.draw [W]']:
-            period_list.append(row['timestamp'] - last_pwr['timestamp'])
-            last_pwr = row
-            
-    avg_period = sum(period_list) / len(period_list)
-    median_period = statistics.median(period_list)
-    std_period = statistics.stdev(period_list)
-    print(avg_period)
-    print(median_period)
-    print(std_period)
+            if self.verbose:    print(f'Iteration {i}: x = {x}, loss = {loss(x)}')
+            x_track.append(x)
+            loss_track.append(loss(x))
 
-    # plot the period_list as histogram
-    fig, axis = plt.subplots(nrows=1, ncols=1)
-    axis.hist(period_list, bins=20)
-    axis.set_xlabel('Period (ms)')
-    axis.set_ylabel('Frequency')
-    axis.grid(True, linestyle='--', linewidth=0.5)
+            if np.abs(loss(x + dx) - loss(x)) < error:
+                break
+        
+        return x_track[np.argmin(loss_track)]
 
-    fig.set_size_inches(8, 6)
-    plt.savefig('results/power_update_freq.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('results/power_update_freq.svg', format='svg', bbox_inches='tight')
+    def _reconstr_loss(self, load, power, history_length, loss_type='MSE'):
+        reconstructed = self._reconstruction(load, power, history_length)
 
-    plt.close('all')
+        # norm the 2 signals before calculating the loss
+        power_norm = (power[' power.draw [W]'] - power[' power.draw [W]'].mean()) / power[' power.draw [W]'].std()
+        reconstructed_norm = (reconstructed[' power.draw [W]'] - reconstructed[' power.draw [W]'].mean()) / reconstructed[' power.draw [W]'].std()
 
-    return avg_period
+        if loss_type == 'MSE':
+            return np.mean((power_norm - reconstructed_norm)**2)
+        elif loss_type == 'MAE':
+            return np.mean(np.abs(power[' power.draw [W]'] - reconstructed[' power.draw [W]']))
+        elif loss_type == 'EMSE':
+            return np.sqrt(np.mean((power[' power.draw [W]'] - reconstructed[' power.draw [W]'])**2))
+        else:
+            raise Exception('Invalid loss type')    
 
-def benchload(window, scale_param, test_duration):
-    repetitions = str(test_duration / window)
-    subprocess.call(['./source/run_benchmark.sh', str(window), str(window*scale_param), repetitions])
-    time.sleep(1)
+    def _reconstruction(self, load, power, history_length):
+        # copy the power df
+        reconstructed = power.copy()
+        load['power_draw'] = load['activity'].apply(lambda x: self.idle_pwr if x == 0 else self.load_pwr)
+        pwr_track = reconstructed[' power.draw [W]'].iloc[0]
+        reconstr_pwr = self.idle_pwr
+        for index, row in reconstructed.iterrows():
+            if row['timestamp'] <= 500:
+                reconstructed.loc[index, ' power.draw [W]'] = self.idle_pwr
+            else:
+                if row[' power.draw [W]'] != pwr_track:
+                    pwr_track = row[' power.draw [W]']
+
+                    # find rows in load df that are within the past history_length of the current timestamp
+                    load_window = load[(load['timestamp'] >= row['timestamp'] - history_length) 
+                                & (load['timestamp'] < row['timestamp'])].copy()
+
+                    # interpolate the lower bound of the load window
+                    lb_t = row['timestamp'] - history_length
+                    lb_0 = load[load['timestamp'] < lb_t].iloc[-1]
+                    lb_1 = load[load['timestamp'] > lb_t].iloc[0]
+                    gradient = (lb_1['power_draw'] - lb_0['power_draw']) / (lb_1['timestamp'] - lb_0['timestamp'])
+                    lb_p = lb_0['power_draw'] + gradient * (lb_t - lb_0['timestamp'])
+
+                    # interpolate the upper bound of the load window
+                    ub_t = row['timestamp']
+                    ub_0 = load[load['timestamp'] < ub_t].iloc[-1]
+                    ub_1 = load[load['timestamp'] > ub_t].iloc[0]
+                    gradient = (ub_1['power_draw'] - ub_0['power_draw']) / (ub_1['timestamp'] - ub_0['timestamp'])
+                    ub_p = ub_0['power_draw'] + gradient * (ub_t - ub_0['timestamp'])
+                    
+                    # take the average of the load window
+                    t = np.concatenate((np.array([lb_t]), load_window['timestamp'].to_numpy(), np.array([ub_t])))
+                    p = np.concatenate((np.array([lb_p]), load_window['power_draw'].to_numpy(), np.array([ub_p])))
+                    reconstr_pwr = np.trapz(p, t) / history_length
+                
+                reconstructed.loc[index, ' power.draw [W]'] = reconstr_pwr
+
+        return reconstructed
+
+    def _plot_reconstr_result(self, load_period, load, power, history_length, reconstructed, store_path):
+        # Plot the results
+        fig, axis = plt.subplots(nrows=3, ncols=1)
+
+        axis[0].plot(load['timestamp'], load['activity']*100, label='load')
+        axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
+        axis[0].set_xlabel('Time (ms)')
+        axis[0].set_ylabel('Load')
+        axis[0].grid(True, linestyle='--', linewidth=0.5)
+        axis[0].set_xlim(0, load['timestamp'].max())
+        axis[0].legend()
+        axis[0].set_title(f'{self.gpu_name} - {load_period} ms load window - modeled history length: {history_length:.2f} ms')
+        
+        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
+        axis[1].set_xlabel('Time (ms)')
+        axis[1].set_ylabel('Power [W]')
+        axis[1].grid(True, linestyle='--', linewidth=0.5)
+        axis[1].set_xlim(axis[0].get_xlim())
+
+        axis[2].plot(reconstructed['timestamp'], reconstructed[' power.draw [W]'], label='reconstructed')
+        axis[2].set_xlabel('Time (ms)')
+        axis[2].set_ylabel('Power [W]')
+        axis[2].grid(True, linestyle='--', linewidth=0.5)
+        axis[2].set_xlim(axis[0].get_xlim())
+
+        fig.set_size_inches(20, 12)
+        plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
+
+    def _plot_overall_analysis(self):
+        pass
+
+def main():
+    start = time.time()
+    benchmark = GPU_pwr_benchmark(verbose=True)
+    # benchmark.prepare_experiment()
+    benchmark.run_experiment()
+    benchmark.process_results()
+    end = time.time()
+    print(f'Time taken: {(end - start) // 60} minutes {round((end - start) % 60, 2)} seconds')
 
 
-def random_sleep():
-    time.sleep(random.random())
 
 if __name__ == "__main__":
     main()

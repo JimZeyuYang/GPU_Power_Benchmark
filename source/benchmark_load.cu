@@ -51,6 +51,8 @@ int main(int argc, const char **argv) {
     int delay = std::stoi(argv[1]);
     int niter = std::stoi(argv[2]);
     int testLength = std::stoi(argv[3]);
+    std::string result_dir = argv[4];
+    
 
     int dev = findCudaDevice(argc, (const char **) argv);
     if (dev == -1) return EXIT_FAILURE;
@@ -61,9 +63,9 @@ int main(int argc, const char **argv) {
     int nthreads = devProp.maxThreadsPerBlock;
 
     int nsize    = nblocks * nthreads;
-    std::cout << "nblocks: " << nblocks << std::endl;
-    std::cout << "nthreads: " << nthreads << std::endl;
-    std::cout << "nsize: " << nsize << std::endl;
+    // std::cout << "nblocks: " << nblocks << std::endl;
+    // std::cout << "nthreads: " << nthreads << std::endl;
+    // std::cout << "nsize: " << nsize << std::endl;
 
     float *h_x, *d_x;
     h_x = (float *)malloc(nsize*sizeof(float));
@@ -86,28 +88,31 @@ int main(int argc, const char **argv) {
     for (int i=0; i<testLength; i++) {
         timestamps[2*i] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         
-        cudaEventRecord(start); 
+        // cudaEventRecord(start); 
+
         my_first_kernel<<<nblocks,nthreads>>>(d_x, niter);
         getLastCudaError("my_first_kernel execution failed\n");
         
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
+        // cudaEventRecord(stop);
+        // cudaEventSynchronize(stop);
+        cudaDeviceSynchronize();
 
-        float milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        std::cout << "Elapsed time:    " << milliseconds << " ms" << std::endl;
+        // float milliseconds = 0;
+        // cudaEventElapsedTime(&milliseconds, start, stop);
+        // std::cout << "Elapsed time:    " << milliseconds << " ms" << std::endl;
         
         // Record the end time
         timestamps[2*i+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         usleep(delay*1000);
-        std::cout << "Sleeping for:    " << delay << "      ms" << std::endl;
+        // std::cout << "Sleeping for:    " << delay << "      ms" << std::endl;
     }
     timestamps[2*testLength] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     sleep(1);
     
     // Write the timestamps to a file
     std::ofstream outfile;
-    outfile.open("results/timestamps.csv");
+    std::string filename = result_dir + "/timestamps.csv";
+    outfile.open(filename);
     outfile << "timestamp" << std::endl;
     for (int i = 0; i < 2*testLength+1; i++) {
         outfile << timestamps[i] << std::endl;
@@ -120,8 +125,12 @@ int main(int argc, const char **argv) {
     // Check if the result is correct
     float sum = 0.0;
     for (int i=0; i<nsize; i++) sum += h_x[i];
-    if (sum/nsize == CHECK) std::cout << "Result check passed" << std::endl;
-    else std::cout << "Result check failed" << std::endl;
+
+    // raise a error if sum/nsize != CHECK
+    if (sum/nsize != CHECK) {
+        printf("Error: result is %f instead of %f\n", sum/nsize, CHECK);
+        exit(EXIT_FAILURE);
+    }
     
 
     // free memory 
