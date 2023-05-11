@@ -489,7 +489,7 @@ class GPU_pwr_benchmark:
 
 def main():
     start = time.time()
-    benchmark = GPU_pwr_benchmark(verbose=True)
+    benchmark = GPU_pwr_benchmark()
     # benchmark.prepare_experiment()
     benchmark.run_experiment()
     benchmark.process_results()
