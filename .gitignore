@@ -1,11 +1,9 @@
 # ignore the env folder
 /env
+/results
 
 # ignore the benchmark_load file under the bin folder
 /bin/benchmark_load
-
-# ignore all csv files
-*.csv
 
 # ignore all files with .out extension
 *.out

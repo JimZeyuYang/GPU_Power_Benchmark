@@ -26,7 +26,7 @@ gpudata_dir=$result_dir/gpudata.csv
 
 # Run the nvidia-smi command in the background
 # echo "Running nvidia-smi measurement in the background..."
-nvidia-smi --query-gpu=timestamp,power.draw,utilization.gpu,utilization.memory --format=csv,nounits -f $gpudata_dir -lms 5 &
+nvidia-smi --id=0 --query-gpu=timestamp,power.draw,utilization.gpu --format=csv,nounits -f $gpudata_dir -lms 5 &
 nvidia_pid=$!
 
 # Run your code here

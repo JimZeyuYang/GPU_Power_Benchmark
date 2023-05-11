@@ -11,7 +11,6 @@ import random
 import os
 from multiprocessing import Pool
 
-q
 # Steps
 # -. Fix GPU core and mem clock
 # -. Recompile code in case of changes
@@ -28,7 +27,7 @@ class GPU_pwr_benchmark:
         print('Initializing benchmark...')
         self.verbose = verbose
         self.BST = True
-        self.repetitions = 64
+        self.repetitions = 8
 
         self._recompile_load()
         self.gpu_name = self._get_gpu_name()
