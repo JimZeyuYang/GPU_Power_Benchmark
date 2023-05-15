@@ -27,15 +27,9 @@ class GPU_pwr_benchmark:
         print('Initializing benchmark...')
         self.verbose = verbose
         self.BST = True
-        self.repetitions = 8
+        self.repetitions = 64
 
-        self._recompile_load()
         self.gpu_name = self._get_gpu_name()
-
-        run = 0
-        while os.path.exists(os.path.join('results', f'{self.gpu_name}_run_#{run}')): run += 1
-        self.result_dir = os.path.join('results', f'{self.gpu_name}_run_#{run}')
-        os.makedirs(self.result_dir)
 
         self.scale_gradient, self.scale_intercept = 1375, -1500
         self.pwr_update_freq = 100
@@ -45,15 +39,23 @@ class GPU_pwr_benchmark:
         # 100ms: 50    67   75   100  125  133  150
         # 20ms:  10    13   15   20   25   27   30
 
-        self._print_general_info()
-
-
+        
     def prepare_experiment(self):
         print('Preparing for experiment...    ')
+
+        run = 0
+        while os.path.exists(os.path.join('results', f'{self.gpu_name}_run_#{run}')): run += 1
+        self.result_dir = os.path.join('results', f'{self.gpu_name}_run_#{run}')
+        os.makedirs(self.result_dir)
+
+        self._recompile_load()
         self._warm_up()
+
         self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
         self.pwr_update_freq = self._find_pwr_update_freq()
         self.idle_pwr, self.load_pwr = self._find_idle_load_pwr()
+        
+        self._print_general_info()
 
     def _print_general_info(self):
         time_ = 'Date and time:        ' + time.strftime('%d/%m/%Y %H:%M:%S')
@@ -83,7 +85,7 @@ class GPU_pwr_benchmark:
     def _benchload(self, load_pd, test_duration, store_path, delay=True):
         repetitions = str(int(test_duration / load_pd))
         niters = str(int(load_pd * self.scale_gradient + self.scale_intercept))
-        subprocess.call(['./source/run_benchmark.sh', str(load_pd), niters, repetitions, store_path])
+        subprocess.call(['./source/run_benchmark_load.sh', str(load_pd), niters, repetitions, store_path])
         if delay:  time.sleep(1)
     
     def _random_sleep(self):
@@ -97,7 +99,7 @@ class GPU_pwr_benchmark:
         print('done')
 
     def _f_duration(self, niter, store_path):
-        subprocess.call(['./source/run_benchmark.sh', '50', str(niter), '30', store_path])
+        subprocess.call(['./source/run_benchmark_load.sh', '50', str(niter), '30', store_path])
         
         df = pd.read_csv(os.path.join(store_path, 'timestamps.csv'))
         df = df.drop_duplicates(subset=['timestamp'])
@@ -231,7 +233,7 @@ class GPU_pwr_benchmark:
                 period_list.append(row['timestamp'] - last_pwr['timestamp'])
                 last_pwr = row
                 
-        avg_period = sum(period_list) / len(period_list)
+        avg_period = statistics.mean(period_list)
         median_period = statistics.median(period_list)
         std_period = statistics.stdev(period_list)
 
@@ -272,8 +274,11 @@ class GPU_pwr_benchmark:
                 self._random_sleep()
                 self._benchload(load_pd, 4000, rep_store_path, delay=False)
             
-    def process_results(self):
+    def process_results(self, data_dir=None, notes=None):
         print('Processing results...')
+
+        if data_dir is not None:
+            self.result_dir = self.result_dir = os.path.join('results', f'{self.gpu_name}_run_#{data_dir}')
 
         results = []
         labels = []
@@ -296,20 +301,45 @@ class GPU_pwr_benchmark:
             pool.close()
             pool.join()
 
-            for result in ratio_results:
-                print(result)
+            # find mean median and std of results
+            mean = statistics.mean(ratio_results)
+            median = statistics.median(ratio_results)
+            std = statistics.stdev(ratio_results)
+            print(f'    Mean:   {mean:.2f} ms')
+            print(f'    Median: {median:.2f} ms')
+            print(f'    Std:    {std:.2f} ms')
+            
             results.append(ratio_results)
+        
+        results_flat = [item for sublist in results for item in sublist]
+        mean = statistics.mean(results_flat)
+        median = statistics.median(results_flat)
+        std = statistics.stdev(results_flat)
+        print('  Overall:')
+        print(f'    Mean:   {mean:.2f} ms')
+        print(f'    Median: {median:.2f} ms')
+        print(f'    Std:    {std:.2f} ms')
+
+        results.append(results_flat)
+        labels.append('all')
 
         # plot the results
         fig, axis = plt.subplots(nrows=1, ncols=1)
         self._violin_plot(axis, results, labels)
         axis.set_xlabel('Load period (ms)')
         axis.set_ylabel('History Length (ms)')
-        fig.set_size_inches(8, 6)
-        plt.savefig(os.path.join(self.result_dir, 'history_length.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-        plt.savefig(os.path.join(self.result_dir, 'history_length.svg'), format='svg', bbox_inches='tight')
-        plt.close('all')
+        axis.set_title(f'History Length vs Load Period ({self.gpu_name})')
+        # add some texts at the bottom of the plot
+        axis.text(0.05, -0.1,  f'Mean history Length:   {mean:.2f} ms', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis.text(0.05, -0.15, f'Median history Length: {median:.2f} ms', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis.text(0.05, -0.2,  f'Std history Length:    {std:.2f} ms', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis.text(0.5, -0.15, f'GPU: {self.gpu_name}', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
 
+        fig.set_size_inches(10, 6)
+        fname = f'history_length_{self.gpu_name}{notes}'
+        plt.savefig(os.path.join(self.result_dir, fname+'.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(self.result_dir, fname+'.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
 
     def _adjacent_values(self, vals, q1, q3):
         upper_adjacent_value = q3 + (q3 - q1) * 1.5
@@ -323,7 +353,7 @@ class GPU_pwr_benchmark:
         ax.get_xaxis().set_tick_params(direction='out')
         ax.xaxis.set_ticks_position('bottom')
         ax.set_xticks(np.arange(1, len(labels) + 1))
-        ax.set_xticklabels(labels, ha='right')
+        ax.set_xticklabels(labels, ha='center')
         ax.set_xlim(0.25, len(labels) + 0.75)
 
     def _violin_plot(self, ax, data, labels):
@@ -335,6 +365,9 @@ class GPU_pwr_benchmark:
             pc.set_facecolor('#76b900')
             pc.set_edgecolor('#76b900')
             pc.set_alpha(1)
+        # set the last violin to be a different color
+        parts['bodies'][-1].set_facecolor('#ED1C24')
+        parts['bodies'][-1].set_edgecolor('#ED1C24')
 
         percentiles = np.stack([np.percentile(row, [25, 50, 75]) for row in data], axis=0)
         quartile1, medians, quartile3 = percentiles[:, 0], percentiles[:, 1], percentiles[:, 2]
@@ -345,13 +378,12 @@ class GPU_pwr_benchmark:
         whiskersMin, whiskersMax = whiskers[:, 0], whiskers[:, 1]
 
         inds = np.arange(1, len(medians) + 1)
-        ax.scatter(inds, medians, marker='o', color='white', s=2, zorder=3)
-        ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=1)
+        ax.scatter(inds, medians, marker='o', color='white', s=12, zorder=3)
+        ax.vlines(inds, quartile1, quartile3, color='k', linestyle='-', lw=5)
         ax.vlines(inds, whiskersMin, whiskersMax, color='k', linestyle='-', lw=1)
 
         self._set_axis_style(ax, labels)
         ax.grid(True, linestyle='--', linewidth=0.5)
-
 
     def _process_single_run(self, result_dir, load_period):
         load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
@@ -415,6 +447,7 @@ class GPU_pwr_benchmark:
 
     def _reconstruction(self, load, power, history_length):
         # copy the power df
+        delay = 1
         reconstructed = power.copy()
         load['power_draw'] = load['activity'].apply(lambda x: self.idle_pwr if x == 0 else self.load_pwr)
         pwr_track = reconstructed[' power.draw [W]'].iloc[0]
@@ -425,22 +458,24 @@ class GPU_pwr_benchmark:
             else:
                 if row[' power.draw [W]'] != pwr_track:
                     pwr_track = row[' power.draw [W]']
-
+                                
+                    # need to take a look at the greater and greater equals shit !!!!!!!!!!!!!
                     # find rows in load df that are within the past history_length of the current timestamp
-                    load_window = load[(load['timestamp'] >= row['timestamp'] - history_length) 
-                                & (load['timestamp'] < row['timestamp'])].copy()
+                    load_window = load[(load['timestamp'] >= row['timestamp'] - history_length - delay) 
+                                & (load['timestamp'] < row['timestamp'] - delay)].copy()
 
                     # interpolate the lower bound of the load window
-                    lb_t = row['timestamp'] - history_length
+                    lb_t = row['timestamp'] - history_length - delay
                     lb_0 = load[load['timestamp'] < lb_t].iloc[-1]
-                    lb_1 = load[load['timestamp'] > lb_t].iloc[0]
+                    lb_1 = load[load['timestamp'] >= lb_t].iloc[0]
                     gradient = (lb_1['power_draw'] - lb_0['power_draw']) / (lb_1['timestamp'] - lb_0['timestamp'])
                     lb_p = lb_0['power_draw'] + gradient * (lb_t - lb_0['timestamp'])
 
                     # interpolate the upper bound of the load window
-                    ub_t = row['timestamp']
+                    ub_t = row['timestamp'] - delay
                     ub_0 = load[load['timestamp'] < ub_t].iloc[-1]
-                    ub_1 = load[load['timestamp'] > ub_t].iloc[0]
+                    ub_1 = load[load['timestamp'] >= ub_t].iloc[0]
+
                     gradient = (ub_1['power_draw'] - ub_0['power_draw']) / (ub_1['timestamp'] - ub_0['timestamp'])
                     ub_p = ub_0['power_draw'] + gradient * (ub_t - ub_0['timestamp'])
                     
@@ -483,15 +518,13 @@ class GPU_pwr_benchmark:
         plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
 
-    def _plot_overall_analysis(self):
-        pass
 
 def main():
     start = time.time()
     benchmark = GPU_pwr_benchmark()
     # benchmark.prepare_experiment()
-    benchmark.run_experiment()
-    benchmark.process_results()
+    # benchmark.run_experiment()
+    benchmark.process_results(0, 'x_init=50,delay=1')
     end = time.time()
     print(f'Time taken: {(end - start) // 60} minutes {round((end - start) % 60, 2)} seconds')
 
