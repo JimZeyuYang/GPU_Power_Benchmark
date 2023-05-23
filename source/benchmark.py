@@ -447,7 +447,7 @@ class GPU_pwr_benchmark:
 
     def _reconstruction(self, load, power, history_length):
         # copy the power df
-        delay = 1
+        delay = 0
         reconstructed = power.copy()
         load['power_draw'] = load['activity'].apply(lambda x: self.idle_pwr if x == 0 else self.load_pwr)
         pwr_track = reconstructed[' power.draw [W]'].iloc[0]
@@ -522,9 +522,9 @@ class GPU_pwr_benchmark:
 def main():
     start = time.time()
     benchmark = GPU_pwr_benchmark()
-    # benchmark.prepare_experiment()
-    # benchmark.run_experiment()
-    benchmark.process_results(0, 'x_init=50,delay=1')
+    benchmark.prepare_experiment()
+    benchmark.run_experiment()
+    benchmark.process_results(0, 'x_init=50')
     end = time.time()
     print(f'Time taken: {(end - start) // 60} minutes {round((end - start) % 60, 2)} seconds')
 
