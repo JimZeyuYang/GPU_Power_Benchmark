@@ -35,7 +35,7 @@ class GPU_pwr_benchmark:
         self.pwr_update_freq = 100
         self.idle_pwr, self.load_pwr = 77, 208
 
-        self.aliasing_ratios = [1/3, 2/3, 3/4, 1, 5/4, 4/3, 3/2]
+        self.aliasing_ratios = [2/3, 3/4, 4/5, 6/5, 5/4, 4/3]
         # 100ms: 50    67   75   100  125  133  150
         # 20ms:  10    13   15   20   25   27   30
 
@@ -120,7 +120,7 @@ class GPU_pwr_benchmark:
         return intercept, gradient
 
     def _find_scale_parameter(self):
-        print('  Finding scale parameter...       ', end='', flush=True)
+        print('  Finding scale parameter...           ', end='', flush=True)
 
         store_path = os.path.join(self.result_dir, 'find_scale_param')
         os.makedirs(store_path)
