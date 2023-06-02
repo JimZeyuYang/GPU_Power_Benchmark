@@ -56,8 +56,11 @@ class GPU_pwr_benchmark:
     def _recompile_load(self):
         print('Recompiling benchmark load...')
         # make clean and make
+        # try can catch the error
         subprocess.call(['make', '-C', 'source/', 'clean'])
-        subprocess.call(['make', '-C', 'source/'])
+        return_code = subprocess.call(['make', '-C', 'source/'])
+        if return_code != 0:  raise Exception('Error compiling benchmark')
+
         print()
 
     def _get_gpu_name(self):
@@ -209,47 +212,49 @@ class GPU_pwr_benchmark:
         print(f'{median_period:.2f} ms')
         return median_period
 
-    def run_experiment(self):
-        # Experiment 1: Steady state and trasient response analysis
-        print('_____________________________________________________________________')
-        print('Running experiment 1: Steady state and transient response analysis...')
-        os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
-        for percentage in range(25, 101, 25):
-            print(f'  Running experiment with {percentage}% load...')
-            # create the store path
-            percentage_store_path = os.path.join(self.result_dir, 'Experiment_1', f'{percentage}%_load')
-            os.makedirs(percentage_store_path)
+    def run_experiment(self, experiment):
+        if experiment == 1:
+            # Experiment 1: Steady state and trasient response analysis
+            print('_____________________________________________________________________')
+            print('Running experiment 1: Steady state and transient response analysis...')
+            os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
+            for percentage in range(25, 101, 25):
+                print(f'  Running experiment with {percentage}% load...')
+                # create the store path
+                percentage_store_path = os.path.join(self.result_dir, 'Experiment_1', f'{percentage}%_load')
+                os.makedirs(percentage_store_path)
 
-            for rep in range(int(self.repetitions/4)):
-                print(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
-                rep_store_path = os.path.join(percentage_store_path, f'rep_#{rep}')
-                os.makedirs(rep_store_path)
-                time.sleep(random.random())
+                for rep in range(int(self.repetitions/4)):
+                    print(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
+                    rep_store_path = os.path.join(percentage_store_path, f'rep_#{rep}')
+                    os.makedirs(rep_store_path)
+                    time.sleep(random.random())
 
-                niters = int(6000 * self.scale_gradient + self.scale_intercept)
-                config = f'6000,{niters},1,{percentage}'
-                self._run_benchmark(1, config, rep_store_path)
+                    niters = int(6000 * self.scale_gradient + self.scale_intercept)
+                    config = f'6000,{niters},1,{percentage}'
+                    self._run_benchmark(1, config, rep_store_path, delay=False)
 
-        
-        # Experiment 2: Load with different aliasing ratios to find averaging window duration
-        print('______________________________________________________________________')
-        print('Running experiment 2: Finding averaging window duration by aliasing...')
-        os.makedirs(os.path.join(self.result_dir, 'Experiment_2'))
-        for ratio in self.aliasing_ratios:
-            load_pd = int(ratio * self.pwr_update_freq)
-            print(f'  Running experiment with load period of {load_pd} ms...')
-            # create the store path
-            ratio_store_path = os.path.join(self.result_dir, 'Experiment_2', f'load_{load_pd}_ms')    
-            os.makedirs(ratio_store_path)
-                        
-            for rep in range(self.repetitions):
-                print(f'  Repetition {rep+1} of {self.repetitions}...    ')
-                rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
-                os.makedirs(rep_store_path)
-                time.sleep(random.random())
-                self._benchload(load_pd, 4000, rep_store_path, delay=False)
-            
-
+        elif experiment == 2:
+            # Experiment 2: Load with different aliasing ratios to find averaging window duration
+            print('______________________________________________________________________')
+            print('Running experiment 2: Finding averaging window duration by aliasing...')
+            os.makedirs(os.path.join(self.result_dir, 'Experiment_2'))
+            for ratio in self.aliasing_ratios:
+                load_pd = int(ratio * self.pwr_update_freq)
+                print(f'  Running experiment with load period of {load_pd} ms...')
+                # create the store path
+                ratio_store_path = os.path.join(self.result_dir, 'Experiment_2', f'load_{load_pd}_ms')    
+                os.makedirs(ratio_store_path)
+                            
+                for rep in range(self.repetitions):
+                    print(f'  Repetition {rep+1} of {self.repetitions}...    ')
+                    rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
+                    os.makedirs(rep_store_path)
+                    
+                    self._benchload(load_pd, 4000, rep_store_path, delay=False)
+                    time.sleep(random.random())
+        else:
+            raise ValueError(f'Invalid experiment number {experiment}')
 
     def process_results(self, GPU_name=None, run=0, notes=None):
         print('Processing results...')

@@ -9,12 +9,12 @@ def main():
     parser = argparse.ArgumentParser(description='GPU Power Benchmark')
 
     parser.add_argument('-b', '--benchmark', action='store_true', help='Runs the benchmark')
+    parser.add_argument('-e', '--experiments', help='Specify the expriments to run')
     parser.add_argument('-p', '--plot', action='store_true', help='Plots the results of the benchmark')
     parser.add_argument('-g', '--gpu', help='GPU model data to process')
     parser.add_argument('-v', '--verbose', action='store_true', help='Prints out the results of the benchmark')
 
     args = parser.parse_args()
-
     experiment(args)
 
 
@@ -24,9 +24,15 @@ def experiment(args):
     benchmark = GPU_pwr_benchmark(verbose=args.verbose)
     if args.benchmark:
         benchmark.prepare_experiment()
-        benchmark.run_experiment()
-        if args.plot:
-            benchmark.plot_results()
+
+        if args.experiment is not None:
+            experiments = [int(x) for x in args.experiment.split(',')]
+        else:
+            experiments = [1, 2]
+
+        for experiment in experiments:  benchmark.run_experiment(experiment)
+        if args.plot:  benchmark.plot_results()
+
     elif args.plot:
         if args.gpu is None:
             raise Exception('GPU model not specified')
