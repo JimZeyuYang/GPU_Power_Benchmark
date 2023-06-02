@@ -7,3 +7,6 @@
 
 # ignore all files with .out extension
 *.out
+
+# ignore pychache folder
+__pycache__

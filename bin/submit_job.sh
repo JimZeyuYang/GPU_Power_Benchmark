@@ -1,12 +1,11 @@
 #! /bin/bash
-#SBATCH --job-name=DLEI
+#SBATCH --job-name=GPB_A100
 #SBATCH --nodes=1
-#SBATCH --time=4:00:00
+#SBATCH --time=5:00:00
 #SBATCH --exclusive
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1 --constraint='gpu_sku:A100'
 
 #SBATCH --partition=test
-#SBATCH --nodelist=htc-g019
 
 source bin/env_setup.sh
 
