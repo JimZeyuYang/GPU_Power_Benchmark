@@ -25,8 +25,8 @@ def experiment(args):
     if args.benchmark:
         benchmark.prepare_experiment()
 
-        if args.experiment is not None:
-            experiments = [int(x) for x in args.experiment.split(',')]
+        if args.experiments is not None:
+            experiments = [int(x) for x in args.experiments.split(',')]
         else:
             experiments = [1, 2]
 

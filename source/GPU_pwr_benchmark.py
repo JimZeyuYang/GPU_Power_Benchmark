@@ -98,14 +98,14 @@ class GPU_pwr_benchmark:
         # While loop that run for at least 60 seconds
         start_time = time.time()
         while time.time() - start_time < 60:
-            self._run_benchmark(1, '50,100000,20,100', store_path)
+            self._run_benchmark(1, '50,1000000,20,100', store_path)
         print('done')
 
-    def _find_scale_parameter(self):
+    def _find_scale_parameter(self, store_path=None, percentage=100):
         print('Finding scale parameter...           ', end='', flush=True)
 
         def f_duration(niter, store_path):
-            config = f'50,{niter},30,100'
+            config = f'50,{niter},30,{percentage}'
             self._run_benchmark(1, config, store_path)
             
             df = pd.read_csv(os.path.join(store_path, 'timestamps.csv'))
@@ -126,10 +126,13 @@ class GPU_pwr_benchmark:
             gradient = coefficents[1]
             return intercept, gradient
 
-        store_path = os.path.join(self.result_dir, 'Preparation', 'find_scale_param')
+        if store_path is None:
+            store_path = os.path.join(self.result_dir, 'Preparation', 'find_scale_param')
+        else:
+            store_path = os.path.join(store_path, 'find_scale_param')
         os.makedirs(store_path)
 
-        niter = 1000
+        niter = 10000
         duration = 0
 
         duration_list = []
@@ -223,16 +226,17 @@ class GPU_pwr_benchmark:
                 # create the store path
                 percentage_store_path = os.path.join(self.result_dir, 'Experiment_1', f'{percentage}%_load')
                 os.makedirs(percentage_store_path)
+                scale_gradient, scale_intercept = self._find_scale_parameter(percentage_store_path, percentage)
 
                 for rep in range(int(self.repetitions/4)):
                     print(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
                     rep_store_path = os.path.join(percentage_store_path, f'rep_#{rep}')
                     os.makedirs(rep_store_path)
-                    time.sleep(random.random())
 
-                    niters = int(6000 * self.scale_gradient + self.scale_intercept)
+                    niters = int(6000 * scale_gradient + scale_intercept)
                     config = f'6000,{niters},1,{percentage}'
                     self._run_benchmark(1, config, rep_store_path, delay=False)
+                    time.sleep(random.random())
 
         elif experiment == 2:
             # Experiment 2: Load with different aliasing ratios to find averaging window duration
@@ -241,7 +245,7 @@ class GPU_pwr_benchmark:
             os.makedirs(os.path.join(self.result_dir, 'Experiment_2'))
             for ratio in self.aliasing_ratios:
                 load_pd = int(ratio * self.pwr_update_freq)
-                print(f'  Running experiment with load period of {load_pd} ms...')
+                print(f'  Running experiment with load period of {load_pd} ms...\n  ', end='', flush=True)
                 # create the store path
                 ratio_store_path = os.path.join(self.result_dir, 'Experiment_2', f'load_{load_pd}_ms')    
                 os.makedirs(ratio_store_path)
@@ -251,12 +255,16 @@ class GPU_pwr_benchmark:
                     rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
                     os.makedirs(rep_store_path)
                     
-                    self._benchload(load_pd, 4000, rep_store_path, delay=False)
+                    niters = int(load_pd * self.scale_gradient + self.scale_intercept)
+                    repetitions = int(4000 / load_pd)
+                    config = f'{load_pd},{niters},{repetitions},100'
+                    self._run_benchmark(1, config, rep_store_path, delay=False)
                     time.sleep(random.random())
         else:
             raise ValueError(f'Invalid experiment number {experiment}')
 
     def process_results(self, GPU_name=None, run=0, notes=None):
+        print('_____________________')
         print('Processing results...')
 
         if GPU_name is not None:
@@ -272,8 +280,75 @@ class GPU_pwr_benchmark:
             if len(file_list) == 0:
                 raise FileNotFoundError(f'No file found for GPU {GPU_name} run #{run}')
             self.result_dir = os.path.join('results', file_list[0])
+            self.gpu_name = file_list[0].split('_run_')[0]
 
-        print(f'  Processing results for {self.result_dir.split("/")[-1]}...')
+        print(self.result_dir.split("/")[-1])
+
+        dir_list = os.listdir(self.result_dir)
+        if 'Experiment_1' in dir_list:
+            self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
+
+    def process_exp_1(self, result_dir):
+        def plot_result(dir):
+            load_percentage = dir.split('/')[-2].split('%')[0]
+
+            load = pd.read_csv(os.path.join(dir, 'timestamps.csv'))
+            load.loc[-1] = load.loc[0] - 500000
+            load.index = load.index + 1
+            load = load.sort_index()
+            load['activity'] = (load.index / 2).astype(int) % 2
+            load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
+            t0 = load['timestamp'][0]
+            load['timestamp'] -= t0
+            load.loc[load.index[-1], 'timestamp'] += 500
+            load.loc[load.index[-1], 'activity'] = 0
+
+            power = pd.read_csv(os.path.join(dir, 'gpudata.csv'))
+            power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+            if self.BST:    power['timestamp'] -= 60*60*1000
+            power['timestamp'] -= t0
+            power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
+
+            # plotting
+            fig, axis = plt.subplots(nrows=3, ncols=1)
+
+            axis[0].plot(load['timestamp'], load['activity']*100, label='load')
+            axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
+            axis[0].plot(power['timestamp'], power[' temperature.gpu'], label='temperature.gpu')
+            axis[0].set_xlabel('Time (ms)')
+            axis[0].set_ylabel('Load')
+            axis[0].grid(True, linestyle='--', linewidth=0.5)
+            axis[0].set_xlim(0, load['timestamp'].max())
+            axis[0].legend()
+            axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
+            
+            axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
+            axis[1].set_xlabel('Time (ms)')
+            axis[1].set_ylabel('Power [W]')
+            axis[1].grid(True, linestyle='--', linewidth=0.5)
+            axis[1].set_xlim(axis[0].get_xlim())
+
+            fig.set_size_inches(20, 12)
+            plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+            plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
+            plt.close('all')
+
+        print('  Processing experiment 1...')
+
+        dir_list = os.listdir(result_dir)
+        dir_list = sorted(dir_list, key=lambda dir: int(dir.split('%')[0]))
+        subdir_list = os.listdir(os.path.join(result_dir, dir_list[0]))
+        subdir_list = [dir for dir in subdir_list if 'find_scale_param' not in dir]
+        subdir_list = sorted(subdir_list, key=lambda dir: int(dir.split('#')[1]))
+        dir_list = [os.path.join(result_dir, dir, subdir) 
+                        for dir in dir_list 
+                            for subdir in subdir_list]
+        
+        for dir in dir_list:
+            print(f'  Processing {dir}...')
+            plot_result(dir)
+
+    def process_exp_2(self):
         # list the directories in the result directory
         dir_list = os.listdir(self.result_dir)
         # get the directories that ends with 'ms'
@@ -314,10 +389,8 @@ class GPU_pwr_benchmark:
             pool.close()
             pool.join()
 
-
             continue
-
-
+            
             # find mean median and std of results
             mean = statistics.mean(ratio_results)
             median = statistics.median(ratio_results)
@@ -327,7 +400,6 @@ class GPU_pwr_benchmark:
             print(f'    Std:    {std:.2f} ms')
             
             results.append(ratio_results)
-
             
         
         return 0
@@ -480,8 +552,6 @@ class GPU_pwr_benchmark:
         plt.savefig(os.path.join(store_path, 'loss_function.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
 
-
-
     def _gradient_descent(self, loss_func, x_init, y_init, lr=200, h=0.05, threshold=1e-6, max_iter=200):
         if self.verbose:    print('    Coarse search')
         x = x_init
@@ -527,8 +597,6 @@ class GPU_pwr_benchmark:
             if i > 5 and np.var(loss_track[-5:]) < 1e-18:    break
 
         return var_track[np.argmin(loss_track)]
-
-
 
     def _reconstr_loss(self, load, power, history_length, delay, loss_type='MSE'):
         reconstructed = self._reconstruction(load, power, history_length, delay)

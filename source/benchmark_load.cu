@@ -63,7 +63,7 @@ int main(int argc, const char **argv) {
     // printDevProps(devProp);
 
     float *h_x, *d_x;
-    int mp_count, nblocks, nthreads, nsize;
+    int nblocks, nthreads, nsize;
 
     if (experiment == 1) {  // Experiment 1: Steady state and transient response / avg window analysis
         // Read the config variables
@@ -73,8 +73,8 @@ int main(int argc, const char **argv) {
         getline(ss, token, ',');  int percent = std::stoi(token);
 
         // begin experiment
-        mp_count = devProp.multiProcessorCount * percent / 100;
-        nblocks  = devProp.maxBlocksPerMultiProcessor * mp_count;
+        // nblocks = devProp.maxBlocksPerMultiProcessor * devProp.multiProcessorCount;
+        nblocks = devProp.multiProcessorCount * percent / 100;
         nthreads = devProp.maxThreadsPerBlock;
         nsize    = nblocks * nthreads;
 
