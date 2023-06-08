@@ -289,58 +289,6 @@ class GPU_pwr_benchmark:
             self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
 
     def process_exp_1(self, result_dir):
-        def plot_result(dir):
-            load_percentage = dir.split('/')[-2].split('%')[0]
-
-            load = pd.read_csv(os.path.join(dir, 'timestamps.csv'))
-            load.loc[-1] = load.loc[0] - 500000
-            load.index = load.index + 1
-            load = load.sort_index()
-            load['activity'] = (load.index / 2).astype(int) % 2
-            load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
-            t0 = load['timestamp'][0]
-            load['timestamp'] -= t0
-            load.loc[load.index[-1], 'timestamp'] += 500
-            load.loc[load.index[-1], 'activity'] = 0
-
-            power = pd.read_csv(os.path.join(dir, 'gpudata.csv'))
-            power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-            if self.BST:    power['timestamp'] -= 60*60*1000
-            power['timestamp'] -= t0
-            power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
-
-            # plotting
-            fig, axis = plt.subplots(nrows=3, ncols=1)
-
-            axis[0].plot(load['timestamp'], load['activity']*100, label='load')
-            axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
-            axis[0].plot(power['timestamp'], power[' temperature.gpu'], label='temperature.gpu')
-            axis[0].set_xlabel('Time (ms)')
-            axis[0].set_ylabel('Load')
-            axis[0].grid(True, linestyle='--', linewidth=0.5)
-            axis[0].set_xlim(0, load['timestamp'].max())
-            axis[0].legend()
-            axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
-            
-            axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
-            axis[1].set_xlabel('Time (ms)')
-            axis[1].set_ylabel('Power [W]')
-            axis[1].grid(True, linestyle='--', linewidth=0.5)
-            axis[1].set_xlim(axis[0].get_xlim())
-            axis[1].legend()
-
-            axis[2].plot(power['timestamp'], power[' clocks.current.sm [MHz]'], label='clocks.current.sm [MHz]')
-            axis[2].set_xlabel('Time (ms)')
-            axis[2].set_ylabel('Clock [MHz]')
-            axis[2].grid(True, linestyle='--', linewidth=0.5)
-            axis[2].set_xlim(axis[0].get_xlim())
-            axis[2].legend()
-
-            fig.set_size_inches(20, 12)
-            plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-            plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
-            plt.close('all')
-
         print('  Processing experiment 1...')
 
         dir_list = os.listdir(result_dir)
@@ -354,13 +302,66 @@ class GPU_pwr_benchmark:
         
         num_processes = min(self.repetitions, os.cpu_count())
         pool = Pool(processes=num_processes)
-        pool.map(plot_result, dir_list)
+        pool.map(self._exp_1_plot_result, dir_list)
         pool.close()
         pool.join()
 
         # for dir in dir_list:
         #     print(f'  Processing {dir}...')
         #     plot_result(dir)
+
+
+    def _exp_1_plot_result(self, dir):
+        load_percentage = dir.split('/')[-2].split('%')[0]
+
+        load = pd.read_csv(os.path.join(dir, 'timestamps.csv'))
+        load.loc[-1] = load.loc[0] - 500000
+        load.index = load.index + 1
+        load = load.sort_index()
+        load['activity'] = (load.index / 2).astype(int) % 2
+        load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
+        t0 = load['timestamp'][0]
+        load['timestamp'] -= t0
+        load.loc[load.index[-1], 'timestamp'] += 500
+        load.loc[load.index[-1], 'activity'] = 0
+
+        power = pd.read_csv(os.path.join(dir, 'gpudata.csv'))
+        power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+        if self.BST:    power['timestamp'] -= 60*60*1000
+        power['timestamp'] -= t0
+        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
+
+        # plotting
+        fig, axis = plt.subplots(nrows=3, ncols=1)
+
+        axis[0].plot(load['timestamp'], load['activity']*100, label='load')
+        axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
+        axis[0].plot(power['timestamp'], power[' temperature.gpu'], label='temperature.gpu')
+        axis[0].set_xlabel('Time (ms)')
+        axis[0].set_ylabel('Load')
+        axis[0].grid(True, linestyle='--', linewidth=0.5)
+        axis[0].set_xlim(0, load['timestamp'].max())
+        axis[0].legend()
+        axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
+        
+        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
+        axis[1].set_xlabel('Time (ms)')
+        axis[1].set_ylabel('Power [W]')
+        axis[1].grid(True, linestyle='--', linewidth=0.5)
+        axis[1].set_xlim(axis[0].get_xlim())
+        axis[1].legend()
+
+        axis[2].plot(power['timestamp'], power[' clocks.current.sm [MHz]'], label='clocks.current.sm [MHz]')
+        axis[2].set_xlabel('Time (ms)')
+        axis[2].set_ylabel('Clock [MHz]')
+        axis[2].grid(True, linestyle='--', linewidth=0.5)
+        axis[2].set_xlim(axis[0].get_xlim())
+        axis[2].legend()
+
+        fig.set_size_inches(20, 12)
+        plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
 
     def process_exp_2(self):
         # list the directories in the result directory
