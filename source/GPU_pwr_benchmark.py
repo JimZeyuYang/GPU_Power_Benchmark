@@ -328,6 +328,12 @@ class GPU_pwr_benchmark:
             axis[1].grid(True, linestyle='--', linewidth=0.5)
             axis[1].set_xlim(axis[0].get_xlim())
 
+            axis[2].plot(power['timestamp'], power[' clocks.current.sm [MHz]'], label='clocks.current.sm [MHz]')
+            axis[2].set_xlabel('Time (ms)')
+            axis[2].set_ylabel('Clock [MHz]')
+            axis[2].grid(True, linestyle='--', linewidth=0.5)
+            axis[2].set_xlim(axis[0].get_xlim())
+
             fig.set_size_inches(20, 12)
             plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
             plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
