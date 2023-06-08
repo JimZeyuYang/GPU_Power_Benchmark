@@ -327,12 +327,14 @@ class GPU_pwr_benchmark:
             axis[1].set_ylabel('Power [W]')
             axis[1].grid(True, linestyle='--', linewidth=0.5)
             axis[1].set_xlim(axis[0].get_xlim())
+            axis[1].legend()
 
             axis[2].plot(power['timestamp'], power[' clocks.current.sm [MHz]'], label='clocks.current.sm [MHz]')
             axis[2].set_xlabel('Time (ms)')
             axis[2].set_ylabel('Clock [MHz]')
             axis[2].grid(True, linestyle='--', linewidth=0.5)
             axis[2].set_xlim(axis[0].get_xlim())
+            axis[2].legend()
 
             fig.set_size_inches(20, 12)
             plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
@@ -350,9 +352,15 @@ class GPU_pwr_benchmark:
                         for dir in dir_list 
                             for subdir in subdir_list]
         
-        for dir in dir_list:
-            print(f'  Processing {dir}...')
-            plot_result(dir)
+        num_processes = min(self.repetitions, os.cpu_count())
+        pool = Pool(processes=num_processes)
+        pool.map(plot_result, dir_list)
+        pool.close()
+        pool.join()
+
+        # for dir in dir_list:
+        #     print(f'  Processing {dir}...')
+        #     plot_result(dir)
 
     def process_exp_2(self):
         # list the directories in the result directory
