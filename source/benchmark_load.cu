@@ -1,13 +1,16 @@
-#include <stdio.h>
 #include <iostream>
-#include <chrono>
-#include <unistd.h>
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <chrono>
+
+#include <stdio.h>
+#include <unistd.h>
 
 #include <cuda_runtime.h>
 #include <helper_cuda.h>
+
+#include "PMD.h"
 
 #define CHECK 1.0
 
@@ -26,9 +29,7 @@ __global__ void my_first_kernel(float *x, int niter) {
 cudaDeviceProp getDeviceProperties() {
     int devCount;
     cudaGetDeviceCount(&devCount);
-    if (devCount == 0) {
-        printf("No CUDA devices found\n");
-    }
+    if (devCount == 0)  printf("No CUDA devices found\n");
 
     cudaDeviceProp devProp;
     cudaGetDeviceProperties(&devProp, 0);
@@ -53,6 +54,8 @@ int main(int argc, const char **argv) {
     int experiment = std::stoi(argv[1]);
     std::string config = argv[2];
     std::string result_dir = argv[3];
+    bool PMD = std::stoi(argv[4]);
+    bool NVML = std::stoi(argv[5]);
     
     std::stringstream ss(config);  std::string token;
     
@@ -67,10 +70,10 @@ int main(int argc, const char **argv) {
 
     if (experiment == 1) {  // Experiment 1: Steady state and transient response / avg window analysis
         // Read the config variables
-        getline(ss, token, ',');  int delay = std::stoi(token);
-        getline(ss, token, ',');  int niter = std::stoi(token);
+        getline(ss, token, ',');  int delay      = std::stoi(token);
+        getline(ss, token, ',');  int niter      = std::stoi(token);
         getline(ss, token, ',');  int testLength = std::stoi(token);
-        getline(ss, token, ',');  int percent = std::stoi(token);
+        getline(ss, token, ',');  int percent    = std::stoi(token);
 
         // begin experiment
         // nblocks = devProp.maxBlocksPerMultiProcessor * devProp.multiProcessorCount;
@@ -90,6 +93,27 @@ int main(int argc, const char **argv) {
         // Measurement begins
         //cudaEvent_t start, stop; cudaEventCreate(&start); cudaEventCreate(&stop);
         
+        // Record data on PMD if enabled
+        int serial_port = 0;
+        uint64_t PMD_start = 0;
+        if (PMD) {
+            serial_port = open_serial_port();
+            handshake(serial_port);
+            change_baud_rate(serial_port, 921600);
+
+            ThreadArgs args = {serial_port, result_dir};
+            pthread_t serialThread;
+
+            config_cont_tx(serial_port, true)
+            PMD_start = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            
+            int rc = pthread_create(&serialThread, NULL, logSerialPort, (void*)&args);
+            if (rc) {
+                std::cout << "Error: unable to create thread, " << rc << std::endl;
+                exit(-1);
+            }
+
+
         uint64_t timestamps[2*testLength+1];
         sleep(1);
         
@@ -116,6 +140,18 @@ int main(int argc, const char **argv) {
         timestamps[2*testLength] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         sleep(1);
 
+        if (PMD) {
+            config_cont_tx(serial_port, false);
+            pthread_join(serialThread, NULL);
+            change_baud_rate(serial_port, 115200);
+            close(serial_port);
+
+            std::ofstream outfile;
+            std::string filename = result_dir + "/PMD_start_ts.txt";
+            outfile.open(filename);
+            outfile << PMD_start << std::endl;
+            outfile.close();
+
         // Write the timestamps to a file
         std::ofstream outfile;
         std::string filename = result_dir + "/timestamps.csv";
@@ -128,15 +164,11 @@ int main(int argc, const char **argv) {
         outfile.close();
 
     } else if (experiment == 2) {  // Experiment 3: Finding averaging window using shifiting delay
-                        
-            
-            
-            
+        // to be added if needed
     } else {
             std::cout << "Invalid experiment number" << std::endl;
             exit(EXIT_FAILURE);
     }
-
 
 
     // Copy the result from device to host

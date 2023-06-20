@@ -17,41 +17,62 @@ class GPU_pwr_benchmark:
         self.BST = True
         self.repetitions = 64
         self.nvsmi_smp_pd = 5
-        self.aliasing_ratios = [2/3, 3/4, 4/5, 6/5, 5/4, 4/3]
+        self.aliasing_ratios = [2/3, 3/4, 4/5, 1, 6/5, 5/4, 4/3]
         
     def prepare_experiment(self):
-        print('___________________________')
-        print('Preparing for experiment...')
 
-        self.gpu_name = self._get_gpu_name()
+
+        self._get_machine_info()
         
         run = 0
         while os.path.exists(os.path.join('results', f'{self.gpu_name}_run_#{run}')): run += 1
         self.result_dir = os.path.join('results', f'{self.gpu_name}_run_#{run}')
         os.makedirs(self.result_dir)
         os.makedirs(os.path.join(self.result_dir, 'Preparation'))
+        self.log_file = os.path.join(self.result_dir, 'log.txt')
 
+        self._print_general_info()
+
+        print('___________________________')
+        print('Preparing for experiment...')
+        self._log('___________________________')
+        self._log('Preparing for experiment...')
+
+
+        if not os.path.exists('/tmp'): os.makedirs('/tmp')
         self._recompile_load()
         self._warm_up()
 
         self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
-        # self.scale_gradient, self.scale_intercept = 1386, -1637
         self.pwr_update_freq = self._find_pwr_update_freq()
-        
-        self._print_general_info()
+    
+    def _log(self, message, end='\n'):
+        with open(self.log_file, 'a') as f:
+            f.write(message + end)
 
     def _print_general_info(self):
         print()
-        time_ = 'Date and time:        ' + time.strftime('%d/%m/%Y %H:%M:%S')
-        gpu =   'Benchmarking on GPU:  ' + self.gpu_name
-        host =  'Host machine:         ' + os.uname()[1]
+        time_ =  'Date and time:        ' + time.strftime('%d/%m/%Y %H:%M:%S')
+        gpu =    'Benchmarking on GPU:  ' + self.gpu_name
+        serial = 'GPU serial number:    ' + self.gpu_serial
+        uuid =   'GPU UUID:             ' + self.gpu_uuid
+        driver = 'Driver version:       ' + self.driver_version
+        cuda =   'CUDA version:         ' + self.cuda_version
+        host =   'Host machine:         ' + os.uname()[1]
 
-        max_len = max(len(time_), len(gpu), len(host))
-        print('+', '-'*(max_len), '+')
-        print('|', time_ + ' '*(max_len - len(time_)), '|')
-        print('|', gpu + ' '*(max_len - len(gpu)), '|')
-        print('|', host + ' '*(max_len - len(host)), '|')
-        print('+', '-'*(max_len), '+')
+        max_len = max(len(time_), len(gpu), len(host), len(serial), len(uuid), len(driver))
+        output = ''
+        output += '+ ' + '-'*(max_len) + ' +\n'
+        output += '| ' + time_ + ' '*(max_len - len(time_)) + ' |\n'
+        output += '| ' + gpu + ' '*(max_len - len(gpu)) + ' |\n'
+        output += '| ' + serial + ' '*(max_len - len(serial)) + ' |\n'
+        output += '| ' + uuid + ' '*(max_len - len(uuid)) + ' |\n'
+        output += '| ' + driver + ' '*(max_len - len(driver)) + ' |\n'
+        output += '| ' + cuda + ' '*(max_len - len(cuda)) + ' |\n'
+        output += '| ' + host + ' '*(max_len - len(host)) + ' |\n'
+        output += '+ ' + '-'*(max_len) + ' +\n'
+        print(output)
+        self._log(output)
 
     def _recompile_load(self):
         print('Recompiling benchmark load...')
@@ -63,15 +84,20 @@ class GPU_pwr_benchmark:
 
         print()
 
-    def _get_gpu_name(self):
-        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv'], stdout=subprocess.PIPE)
-        output = result.stdout.decode().split('\n')
-        gpu_name = output[1]
-        gpu_name = gpu_name.replace(' ', '_')
-        gpu_name = gpu_name[7:]
+    def _get_machine_info(self):
+        result = subprocess.run(['nvidia-smi', '--id=0', '--query-gpu=name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
+        output = result.stdout.decode().split('\n')[0].split(', ')
+        self.gpu_name, self.gpu_serial, self.gpu_uuid, self.driver_version = output
 
-        return gpu_name
-    
+        try:
+            result = subprocess.run(['nvcc', '--version'], capture_output=True, text=True)
+            output = result.stdout
+            cuda_version = output.split('\n')[3].split(',')[1].strip()
+            self.cuda_version = cuda_version
+        except FileNotFoundError:
+            print("CUDA is not installed or 'nvcc' command not found.")
+            self.cuda_version = 'N/A'
+
     def _benchload(self, load_pd, test_duration, store_path, delay=True):
         repetitions = str(int(test_duration / load_pd))
         niters = str(int(load_pd * self.scale_gradient + self.scale_intercept))
@@ -92,6 +118,7 @@ class GPU_pwr_benchmark:
 
     def _warm_up(self):
         print('Warming up GPU...                    ', end='', flush=True)
+        self._log('Warming up GPU...                   ', end='')
         store_path = os.path.join(self.result_dir, 'Preparation', 'warm_up')
         os.makedirs(store_path)
 
@@ -100,9 +127,11 @@ class GPU_pwr_benchmark:
         while time.time() - start_time < 60:
             self._run_benchmark(1, '50,1000000,20,100', store_path)
         print('done')
+        self._log('done')
 
     def _find_scale_parameter(self, store_path=None, percentage=100):
         print('Finding scale parameter...           ', end='', flush=True)
+        self._log('Finding scale parameter...          ', end='')
 
         def f_duration(niter, store_path):
             config = f'50,{niter},30,{percentage}'
@@ -150,6 +179,7 @@ class GPU_pwr_benchmark:
         # Linear regression
         intercept, gradient = linear_regression(duration_list, niter_list)
         print(f'{gradient:.2f} | {intercept:.2f}')
+        self._log(f'{gradient:.2f} | {intercept:.2f}')
 
         # plot niter vs duration
         fig, ax = plt.subplots(nrows=1, ncols=1)
@@ -171,6 +201,7 @@ class GPU_pwr_benchmark:
 
     def _find_pwr_update_freq(self):
         print('Finding power update frequency...    ', end='', flush=True)
+        self._log('Finding power update frequency...   ', end='')
         
         store_path = os.path.join(self.result_dir, 'Preparation', 'find_pwr_update_freq')
         os.makedirs(store_path)
@@ -213,6 +244,7 @@ class GPU_pwr_benchmark:
         plt.close('all')
 
         print(f'{median_period:.2f} ms')
+        self._log(f'{median_period:.2f} ms')
         return median_period
 
     def run_experiment(self, experiment):
@@ -220,9 +252,13 @@ class GPU_pwr_benchmark:
             # Experiment 1: Steady state and trasient response analysis
             print('_____________________________________________________________________')
             print('Running experiment 1: Steady state and transient response analysis...')
+            self._log('_____________________________________________________________________')
+            self._log('Running experiment 1: Steady state and transient response analysis...')
+
             os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
             for percentage in range(25, 101, 25):
                 print(f'  Running experiment with {percentage}% load...')
+                self._log(f'  Running experiment with {percentage}% load...')
                 # create the store path
                 percentage_store_path = os.path.join(self.result_dir, 'Experiment_1', f'{percentage}%_load')
                 os.makedirs(percentage_store_path)
@@ -230,6 +266,7 @@ class GPU_pwr_benchmark:
 
                 for rep in range(int(self.repetitions/4)):
                     print(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
+                    self._log(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
                     rep_store_path = os.path.join(percentage_store_path, f'rep_#{rep}')
                     os.makedirs(rep_store_path)
 
@@ -242,16 +279,24 @@ class GPU_pwr_benchmark:
             # Experiment 2: Load with different aliasing ratios to find averaging window duration
             print('______________________________________________________________________')
             print('Running experiment 2: Finding averaging window duration by aliasing...')
+            self._log('______________________________________________________________________')
+            self._log('Running experiment 2: Finding averaging window duration by aliasing...')
+
+
             os.makedirs(os.path.join(self.result_dir, 'Experiment_2'))
             for ratio in self.aliasing_ratios:
                 load_pd = int(ratio * self.pwr_update_freq)
-                print(f'  Running experiment with load period of {load_pd} ms...\n  ', end='', flush=True)
+                print(f'  Running experiment with load period of {load_pd} ms...')
+                self._log(f'  Running experiment with load period of {load_pd} ms...')
+
                 # create the store path
                 ratio_store_path = os.path.join(self.result_dir, 'Experiment_2', f'load_{load_pd}_ms')    
                 os.makedirs(ratio_store_path)
                             
                 for rep in range(self.repetitions):
-                    print(f'  Repetition {rep+1} of {self.repetitions}...    ')
+                    print(f'  Repetition {rep+1} of {self.repetitions}...')
+                    self._log(f'  Repetition {rep+1} of {self.repetitions}...')
+
                     rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
                     os.makedirs(rep_store_path)
                     
@@ -266,6 +311,8 @@ class GPU_pwr_benchmark:
     def process_results(self, GPU_name=None, run=0, notes=None):
         print('_____________________')
         print('Processing results...')
+        self._log('_____________________')
+        self._log('Processing results...')
 
         if GPU_name is not None:
             # retrive all file name from /results
@@ -283,6 +330,7 @@ class GPU_pwr_benchmark:
             self.gpu_name = file_list[0].split('_run_')[0]
 
         print(self.result_dir.split("/")[-1])
+        self._log(self.result_dir.split("/")[-1])
 
         dir_list = os.listdir(self.result_dir)
         if 'Experiment_1' in dir_list:
@@ -290,6 +338,7 @@ class GPU_pwr_benchmark:
 
     def process_exp_1(self, result_dir):
         print('  Processing experiment 1...')
+        self._log('  Processing experiment 1...')
 
         dir_list = os.listdir(result_dir)
         dir_list = sorted(dir_list, key=lambda dir: int(dir.split('%')[0]))
