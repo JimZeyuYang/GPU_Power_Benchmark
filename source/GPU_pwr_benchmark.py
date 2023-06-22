@@ -8,15 +8,18 @@ import time
 import random
 import os
 from multiprocessing import Pool
+import struct
 
 class GPU_pwr_benchmark:
-    def __init__(self, verbose=False):
+    def __init__(self, sw_meas, PMD=0, verbose=False):
         print('_________________________')
         print('Initializing benchmark...')
         self.verbose = verbose
         self.BST = True
         self.repetitions = 64
         self.nvsmi_smp_pd = 5
+        self.sw_meas = sw_meas
+        self.PMD = PMD
         self.aliasing_ratios = [2/3, 3/4, 4/5, 1, 6/5, 5/4, 4/3]
         
     def prepare_experiment(self):
@@ -57,7 +60,7 @@ class GPU_pwr_benchmark:
         serial = 'GPU serial number:    ' + self.gpu_serial
         uuid =   'GPU UUID:             ' + self.gpu_uuid
         driver = 'Driver version:       ' + self.driver_version
-        cuda =   'CUDA version:         ' + self.cuda_version
+        cuda =   'CUDA version:         ' + self.nvcc_version
         host =   'Host machine:         ' + os.uname()[1]
 
         max_len = max(len(time_), len(gpu), len(host), len(serial), len(uuid), len(driver))
@@ -88,21 +91,16 @@ class GPU_pwr_benchmark:
         result = subprocess.run(['nvidia-smi', '--id=0', '--query-gpu=name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
         output = result.stdout.decode().split('\n')[0].split(', ')
         self.gpu_name, self.gpu_serial, self.gpu_uuid, self.driver_version = output
+        self.gpu_name = self.gpu_name.replace(' ', '_')
 
         try:
             result = subprocess.run(['nvcc', '--version'], capture_output=True, text=True)
             output = result.stdout
-            cuda_version = output.split('\n')[3].split(',')[1].strip()
-            self.cuda_version = cuda_version
+            nvcc_version = output.split('\n')[3].split(',')[1].strip()
+            self.nvcc_version = nvcc_version
         except FileNotFoundError:
             print("CUDA is not installed or 'nvcc' command not found.")
-            self.cuda_version = 'N/A'
-
-    def _benchload(self, load_pd, test_duration, store_path, delay=True):
-        repetitions = str(int(test_duration / load_pd))
-        niters = str(int(load_pd * self.scale_gradient + self.scale_intercept))
-        subprocess.call(['./source/run_benchmark_load.sh', str(load_pd), niters, repetitions, store_path])
-        if delay:  time.sleep(1)
+            self.nvcc_version = 'N/A'
 
     def _run_benchmark(self, experiment, config, store_path, delay=True):
         '''
@@ -113,7 +111,15 @@ class GPU_pwr_benchmark:
             <testlength>    : Number of the square wave periods
             <percentage>    : Percentage of the SMs to be loaded
         '''
-        subprocess.call(['./source/run_benchmark_load.sh', str(experiment), config, store_path, str(self.nvsmi_smp_pd)])
+        subprocess.call([
+                            './source/run_benchmark_load.sh', 
+                            str(experiment), 
+                            config,
+                            store_path, 
+                            str(self.nvsmi_smp_pd), 
+                            self.sw_meas, 
+                            str(self.PMD)
+                        ])
         if delay:  time.sleep(1)
 
     def _warm_up(self):
@@ -161,7 +167,7 @@ class GPU_pwr_benchmark:
             store_path = os.path.join(store_path, 'find_scale_param')
         os.makedirs(store_path)
 
-        niter = 10000
+        niter = 100000
         duration = 0
 
         duration_list = []
@@ -311,8 +317,6 @@ class GPU_pwr_benchmark:
     def process_results(self, GPU_name=None, run=0, notes=None):
         print('_____________________')
         print('Processing results...')
-        self._log('_____________________')
-        self._log('Processing results...')
 
         if GPU_name is not None:
             # retrive all file name from /results
@@ -330,15 +334,14 @@ class GPU_pwr_benchmark:
             self.gpu_name = file_list[0].split('_run_')[0]
 
         print(self.result_dir.split("/")[-1])
-        self._log(self.result_dir.split("/")[-1])
 
         dir_list = os.listdir(self.result_dir)
-        if 'Experiment_1' in dir_list:
-            self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
+        if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
+        # if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'))
+
 
     def process_exp_1(self, result_dir):
         print('  Processing experiment 1...')
-        self._log('  Processing experiment 1...')
 
         dir_list = os.listdir(result_dir)
         dir_list = sorted(dir_list, key=lambda dir: int(dir.split('%')[0]))
@@ -355,12 +358,94 @@ class GPU_pwr_benchmark:
         pool.close()
         pool.join()
 
-        # for dir in dir_list:
-        #     print(f'  Processing {dir}...')
-        #     plot_result(dir)
+        # print(dir_list[0])
+        # self._exp_1_plot_result(dir_list[0])
 
 
     def _exp_1_plot_result(self, dir):
+        def plot_PMD_data(dir, t0, t_max, power, axis):
+            with open(os.path.join(dir, 'PMD_start_ts.txt'), 'r') as f:  pmd_start_ts = int(f.readline()) - 50000
+            with open(os.path.join(dir, 'PMD_data.bin'), 'rb') as f:     pmd_data = f.read()
+
+            bytes_per_sample = 18
+            num_samples = int(len(pmd_data) / bytes_per_sample)
+
+            data_dict = {
+                'timestamp (us)' : [],
+                'pcie1_v': [], 'pcie1_i': [], 'pcie1_p': [],
+                'pcie2_v': [], 'pcie2_i': [], 'pcie2_p': [],
+                'eps1_v' : [], 'eps1_i' : [], 'eps1_p' : [],
+                'eps2_v' : [], 'eps2_i' : [], 'eps2_p' : [],
+            }
+
+            last_timestamp = 0
+            timestamp = 0
+            for i in range(num_samples):
+                sample = pmd_data[i*bytes_per_sample:(i+1)*bytes_per_sample]
+
+                values = struct.unpack('<HHHHHHHHH', sample)
+                values = list(values)
+
+                timestamp += values[0] - last_timestamp
+                if values[0] < last_timestamp:  timestamp += 65536
+                last_timestamp = values[0]
+
+                # enumerate through the values and convert to signed values, begin at index 1
+                for i, value in enumerate(values[1:]):
+                    signed = struct.unpack('<h', struct.pack('<H', value))[0]
+                    signed = (signed >> 4) & 0x0FFF
+                    if signed & (1 << 11):  signed = 0
+                    values[i+1] = signed
+
+                # populate the dictionary
+                data_dict['timestamp (us)'].append(timestamp / 3)
+                data_dict['pcie1_v'].append(values[1] * 0.007568)
+                data_dict['pcie1_i'].append(values[2] * 0.0488)
+                data_dict['pcie1_p'].append(data_dict['pcie1_v'][-1] * data_dict['pcie1_i'][-1])
+                data_dict['pcie2_v'].append(values[3] * 0.007568)
+                data_dict['pcie2_i'].append(values[4] * 0.0488)
+                data_dict['pcie2_p'].append(data_dict['pcie2_v'][-1] * data_dict['pcie2_i'][-1])
+                data_dict['eps1_v'].append(values[5] * 0.007568)
+                data_dict['eps1_i'].append(values[6] * 0.0488)
+                data_dict['eps1_p'].append(data_dict['eps1_v'][-1] * data_dict['eps1_i'][-1])
+                data_dict['eps2_v'].append(values[7] * 0.007568)
+                data_dict['eps2_i'].append(values[8] * 0.0488)
+                data_dict['eps2_p'].append(data_dict['eps2_v'][-1] * data_dict['eps2_i'][-1])
+
+
+            df = pd.DataFrame(data_dict)
+
+            df['timestamp (us)'] += (pmd_start_ts - df['timestamp (us)'][0])
+            df['timestamp (ms)'] = (df['timestamp (us)'] / 1000) - t0
+            
+            df = df[(df['timestamp (ms)'] >= 0) & (df['timestamp (ms)'] <= t_max)]
+
+            df['pcie_total_p'] = df['pcie1_p'] + df['pcie2_p']
+            df['eps_total_p'] = df['eps1_p'] + df['eps2_p']
+            df['total_p'] = df['pcie_total_p'] + df['eps_total_p']
+            
+            axis[1].fill_between(df['timestamp (ms)'], df['total_p'], df['eps_total_p'], alpha=0.5, label='Rower draw from PCIE power cables')
+            axis[1].fill_between(df['timestamp (ms)'], df['eps_total_p'], 0, alpha=0.5, label='Power draw from PCIE slot')
+            
+            
+            # iterate through df using iterrows
+            last_timestamp = 0
+            for index, row in power.iterrows():
+                df.loc[(df['timestamp (ms)'] > last_timestamp) & (df['timestamp (ms)'] <= row['timestamp']), 'nv_power'] = row[' power.draw [W]']
+                last_timestamp = row['timestamp']
+
+            df['nv_power_error'] = df['nv_power'] - df['total_p']
+            mse = np.mean(df['nv_power_error']**2)
+            # print('MSE: {}'.format(mse))
+            
+            axis[2].fill_between(df['timestamp (ms)'], df['nv_power_error'], 0, alpha=1, label=f'Power reading error, MSE={mse:.2f}', color='red')
+            axis[2].set_xlabel('Time (ms)')
+            axis[2].set_ylabel('Difference [W]')
+            axis[2].grid(True, linestyle='--', linewidth=0.5)
+            axis[2].set_xlim(axis[0].get_xlim())
+            axis[2].legend()
+            # END OF THE FUNCTION
+
         load_percentage = dir.split('/')[-2].split('%')[0]
 
         load = pd.read_csv(os.path.join(dir, 'timestamps.csv'))
@@ -373,39 +458,43 @@ class GPU_pwr_benchmark:
         load['timestamp'] -= t0
         load.loc[load.index[-1], 'timestamp'] += 500
         load.loc[load.index[-1], 'activity'] = 0
+        t_max = load['timestamp'].max()
 
         power = pd.read_csv(os.path.join(dir, 'gpudata.csv'))
         power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
         if self.BST:    power['timestamp'] -= 60*60*1000
         power['timestamp'] -= t0
-        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
+        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= t_max+10)]
 
+        
         # plotting
         fig, axis = plt.subplots(nrows=3, ncols=1)
 
         axis[0].plot(load['timestamp'], load['activity']*100, label='load')
         axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
         axis[0].plot(power['timestamp'], power[' temperature.gpu'], label='temperature.gpu')
+        # plot this on the second y axis
+        axis_0_1 = axis[0].twinx()
+        axis_0_1.plot(power['timestamp'], power[' clocks.current.sm [MHz]'], label='clocks.current.sm [MHz]', color='red')
+        axis_0_1.set_ylabel('Clock frequency [MHz]')
+        axis_0_1.legend(loc='lower right')
+
         axis[0].set_xlabel('Time (ms)')
-        axis[0].set_ylabel('Load')
+        axis[0].set_ylabel('Load [%] / Temperature [C]')
         axis[0].grid(True, linestyle='--', linewidth=0.5)
-        axis[0].set_xlim(0, load['timestamp'].max())
+        axis[0].set_xlim(0, t_max)
         axis[0].legend()
         axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
-        
-        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
+
+        # check if PMD_data.bin and PMD_start_ts.txt exist
+        if os.path.exists(os.path.join(dir, 'PMD_data.bin')) and os.path.exists(os.path.join(dir, 'PMD_start_ts.txt')):
+            plot_PMD_data(dir, t0, t_max, power, axis)
+        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='Power draw reported by nvidia-smi', linewidth=2, color='black')
         axis[1].set_xlabel('Time (ms)')
         axis[1].set_ylabel('Power [W]')
         axis[1].grid(True, linestyle='--', linewidth=0.5)
         axis[1].set_xlim(axis[0].get_xlim())
         axis[1].legend()
-
-        axis[2].plot(power['timestamp'], power[' clocks.current.sm [MHz]'], label='clocks.current.sm [MHz]')
-        axis[2].set_xlabel('Time (ms)')
-        axis[2].set_ylabel('Clock [MHz]')
-        axis[2].grid(True, linestyle='--', linewidth=0.5)
-        axis[2].set_xlim(axis[0].get_xlim())
-        axis[2].legend()
 
         fig.set_size_inches(20, 12)
         plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')

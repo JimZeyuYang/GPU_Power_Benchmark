@@ -4,6 +4,7 @@ from GPU_pwr_benchmark import GPU_pwr_benchmark
 
 import argparse
 import time
+import os
 
 def main():
     parser = argparse.ArgumentParser(description='GPU Power Benchmark')
@@ -12,6 +13,7 @@ def main():
     parser.add_argument('-e', '--experiments', help='Specify the expriments to run')
     parser.add_argument('-p', '--plot', action='store_true', help='Plots the results of the benchmark')
     parser.add_argument('-g', '--gpu', help='GPU model data to process')
+    parser.add_argument('-m', '--sw_meas', choices=['nvidia-smi', 'NVML', 'none'], default='nvidia-smi', help='Software to use for GPU power measurement')
     parser.add_argument('-v', '--verbose', action='store_true', help='Prints out the results of the benchmark')
 
     args = parser.parse_args()
@@ -21,7 +23,12 @@ def main():
 def experiment(args):
     start = time.time()
 
-    benchmark = GPU_pwr_benchmark(verbose=args.verbose)
+    # check if the linux server hostname equals 'jim-linux', if yes, then use the PMD
+    if os.uname()[1] == 'jim-linux': PMD = 1
+    else:                            PMD = 0
+
+    benchmark = GPU_pwr_benchmark(args.sw_meas, PMD, verbose=args.verbose)
+
     if args.benchmark:
         benchmark.prepare_experiment()
 

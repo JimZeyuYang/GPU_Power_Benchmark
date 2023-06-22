@@ -50,12 +50,13 @@ void printDevProps(cudaDeviceProp devProp) {
     std::cout << "Maximum threads per SM: " << devProp.maxThreadsPerMultiProcessor << std::endl;
 }
 
+
 int main(int argc, const char **argv) {
     int experiment = std::stoi(argv[1]);
     std::string config = argv[2];
     std::string result_dir = argv[3];
-    bool PMD = std::stoi(argv[4]);
-    bool NVML = std::stoi(argv[5]);
+    bool NVML = std::stoi(argv[4]);
+    bool PMD = std::stoi(argv[5]);
     
     std::stringstream ss(config);  std::string token;
     
@@ -96,22 +97,30 @@ int main(int argc, const char **argv) {
         // Record data on PMD if enabled
         int serial_port = 0;
         uint64_t PMD_start = 0;
+        pthread_t serialThread;
+        ThreadArgs* args = nullptr;
+
         if (PMD) {
             serial_port = open_serial_port();
-            handshake(serial_port);
             change_baud_rate(serial_port, 921600);
+            if (!handshake(serial_port)) {
+                std::cout << "Error: handshake failed" << std::endl;
+                exit(-1);
+            }
 
-            ThreadArgs args = {serial_port, result_dir};
-            pthread_t serialThread;
+            args = new ThreadArgs;
+            args->serial_port = serial_port;
+            args->file_path = result_dir;
 
-            config_cont_tx(serial_port, true)
+            config_cont_tx(serial_port, true);
             PMD_start = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
             
-            int rc = pthread_create(&serialThread, NULL, logSerialPort, (void*)&args);
+            int rc = pthread_create(&serialThread, NULL, logSerialPort, args);
             if (rc) {
                 std::cout << "Error: unable to create thread, " << rc << std::endl;
                 exit(-1);
             }
+        }
 
 
         uint64_t timestamps[2*testLength+1];
@@ -143,6 +152,7 @@ int main(int argc, const char **argv) {
         if (PMD) {
             config_cont_tx(serial_port, false);
             pthread_join(serialThread, NULL);
+            delete args;
             change_baud_rate(serial_port, 115200);
             close(serial_port);
 
@@ -151,6 +161,7 @@ int main(int argc, const char **argv) {
             outfile.open(filename);
             outfile << PMD_start << std::endl;
             outfile.close();
+        }
 
         // Write the timestamps to a file
         std::ofstream outfile;

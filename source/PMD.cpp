@@ -193,8 +193,8 @@ void config_cont_tx(int serial_port, bool enable) {
 void* logSerialPort(void* arg) {
     ThreadArgs* args = (ThreadArgs*) arg;
     int serial_port = args->serial_port;
-    std::string file_path = args->file_path + "PMD_data.bin";
     
+    std::string file_path = args->file_path + "/PMD_data.bin";
 
     char buffer[256];
     std::ofstream outFile(file_path, std::ios::binary);
@@ -214,11 +214,11 @@ void* logSerialPort(void* arg) {
             std::cerr << "Error reading from serial port" << std::endl;
             break;
         } else if (rv == 0) {
-            std::cout << "Timeout, no data received within 2 seconds" << std::endl;
+            // std::cout << "Timeout, no data received within 2 seconds" << std::endl;
             break;
         } else {
             int bytes_read = read(serial_port, &buffer, sizeof(buffer));
-            std::cout << "Bytes read: " << bytes_read << std::endl;
+            // std::cout << "Bytes read: " << bytes_read << std::endl;
             if (bytes_read > 0) {
                 outFile.write(buffer, bytes_read);
             }

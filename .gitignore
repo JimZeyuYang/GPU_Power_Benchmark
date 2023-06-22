@@ -8,5 +8,8 @@
 # ignore all files with .out extension
 *.out
 
+# ignore all files with .o extension
+*.o
+
 # ignore pychache folder
 __pycache__
