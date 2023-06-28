@@ -9,6 +9,8 @@ import random
 import os
 from multiprocessing import Pool
 import struct
+from scipy.optimize import minimize
+import csv
 
 class GPU_pwr_benchmark:
     def __init__(self, sw_meas, PMD=0, verbose=False):
@@ -23,8 +25,6 @@ class GPU_pwr_benchmark:
         self.aliasing_ratios = [2/3, 3/4, 4/5, 1, 6/5, 5/4, 4/3]
         
     def prepare_experiment(self):
-
-
         self._get_machine_info()
         
         run = 0
@@ -336,9 +336,11 @@ class GPU_pwr_benchmark:
         print(self.result_dir.split("/")[-1])
 
         dir_list = os.listdir(self.result_dir)
-        if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
-        # if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'))
+        # if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
+        if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'), notes)
 
+    def _convert_pmd_data(self, dir):
+        pass
 
     def process_exp_1(self, result_dir):
         print('  Processing experiment 1...')
@@ -360,7 +362,6 @@ class GPU_pwr_benchmark:
 
         # print(dir_list[0])
         # self._exp_1_plot_result(dir_list[0])
-
 
     def _exp_1_plot_result(self, dir):
         def plot_PMD_data(dir, t0, t_max, power, axis):
@@ -412,11 +413,12 @@ class GPU_pwr_benchmark:
                 data_dict['eps2_i'].append(values[8] * 0.0488)
                 data_dict['eps2_p'].append(data_dict['eps2_v'][-1] * data_dict['eps2_i'][-1])
 
-
             df = pd.DataFrame(data_dict)
 
             df['timestamp (us)'] += (pmd_start_ts - df['timestamp (us)'][0])
-            df['timestamp (ms)'] = (df['timestamp (us)'] / 1000) - t0
+            df['timestamp (ms)'] = (df['timestamp (us)'] / 1000)
+
+            df['timestamp (ms)'] -= t0
             
             df = df[(df['timestamp (ms)'] >= 0) & (df['timestamp (ms)'] <= t_max)]
 
@@ -466,9 +468,14 @@ class GPU_pwr_benchmark:
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= t_max+10)]
 
-        
+        PMD_exists = False
+        if os.path.exists(os.path.join(dir, 'PMD_data.bin')) and os.path.exists(os.path.join(dir, 'PMD_start_ts.txt')):
+            PMD_exists = True
+
         # plotting
-        fig, axis = plt.subplots(nrows=3, ncols=1)
+        n_rows = 2
+        if PMD_exists:    n_rows = 3
+        fig, axis = plt.subplots(nrows=n_rows, ncols=1)
 
         axis[0].plot(load['timestamp'], load['activity']*100, label='load')
         axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
@@ -487,8 +494,8 @@ class GPU_pwr_benchmark:
         axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
 
         # check if PMD_data.bin and PMD_start_ts.txt exist
-        if os.path.exists(os.path.join(dir, 'PMD_data.bin')) and os.path.exists(os.path.join(dir, 'PMD_start_ts.txt')):
-            plot_PMD_data(dir, t0, t_max, power, axis)
+        if PMD_exists:    plot_PMD_data(dir, t0, t_max, power, axis)
+
         axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='Power draw reported by nvidia-smi', linewidth=2, color='black')
         axis[1].set_xlabel('Time (ms)')
         axis[1].set_ylabel('Power [W]')
@@ -496,103 +503,138 @@ class GPU_pwr_benchmark:
         axis[1].set_xlim(axis[0].get_xlim())
         axis[1].legend()
 
-        fig.set_size_inches(20, 12)
+        fig.set_size_inches(20, 4*n_rows)
         plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
         plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
 
-    def process_exp_2(self):
-        # list the directories in the result directory
-        dir_list = os.listdir(self.result_dir)
-        # get the directories that ends with 'ms'
+    def process_exp_2(self, result_dir, notes):
+        dir_list = os.listdir(result_dir)
         dir_list = [dir for dir in dir_list if dir.endswith('ms')]
-        # sort the directories based on the middle split
         dir_list = sorted(dir_list, key=lambda dir: int(dir.split('_')[1]))
-        print(f'  Found {len(dir_list)} directories to process...')
+        print(f'  Found {len(dir_list)-1} directories to process...')
 
-        results = []
+        avg_window_results = []
+        delay_results = []
         labels = []
 
-        self.pwr_update_freq = int(np.mean([int(dir.split('_')[1]) for dir in dir_list]))
+        self.pwr_update_freq = int(statistics.median([int(dir.split('_')[1]) for dir in dir_list]))
 
-
-        ctr = 0
+        
         for dir in dir_list:
-            ctr += 1
-            # if ctr < 3:
-            #     continue
-            
             load_pd = int(dir.split('_')[1])
 
+            if load_pd == self.pwr_update_freq:    continue
+
             print(f'  Processing results for load period of {load_pd} ms...')
-            ratio_store_path = os.path.join(self.result_dir, dir)
+            ratio_store_path = os.path.join(result_dir, dir)
             labels.append(f'{load_pd}')
-
+            
             args = []
-
-            self.repetitions = 1
             for rep in range(self.repetitions):
-                rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep+15}')
+                rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
                 args.append((rep_store_path, load_pd))
 
             num_processes = min(self.repetitions, os.cpu_count())
-            num_processes = 1
             pool = Pool(processes=num_processes)
-            ratio_results = pool.starmap(self._process_single_run, args)
+            results = pool.starmap(self._process_single_run, args)
             pool.close()
             pool.join()
 
-            continue
-            
+            avg_windows, delays = zip(*results)
+            avg_windows = list(avg_windows)
+            delays = list(delays) 
+
             # find mean median and std of results
-            mean = statistics.mean(ratio_results)
-            median = statistics.median(ratio_results)
-            std = statistics.stdev(ratio_results)
-            print(f'    Mean:   {mean:.2f} ms')
-            print(f'    Median: {median:.2f} ms')
-            print(f'    Std:    {std:.2f} ms')
+            avg_window_mean = statistics.mean(avg_windows)
+            avg_window_median = statistics.median(avg_windows)
+            avg_window_std = statistics.stdev(avg_windows)
+
+            delay_mean = statistics.mean(delays)
+            delay_median = statistics.median(delays)
+            delay_std = statistics.stdev(delays)
+
+            print(f'            Delay            Avg window')
+            print(f'    Mean:   {delay_mean:.2f} ms          {avg_window_mean:.2f} ms')
+            print(f'    Median: {delay_median:.2f} ms          {avg_window_median:.2f} ms')
+            print(f'    Std:    {delay_std:.2f} ms          {avg_window_std:.2f} ms')
             
-            results.append(ratio_results)
-            
+            avg_window_results.append(avg_windows)
+            delay_results.append(delays)
+
+        # store avg_window_results and delay_results in a csv file
+        with open(os.path.join(result_dir, 'results.csv'), 'w', newline='') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            csvwriter.writerow(labels)
+            for window in avg_window_results:    csvwriter.writerow(window)
+            for delay  in delay_results:         csvwriter.writerow(delay)
         
-        return 0
+        self._exp_2_plot_results(result_dir, notes)
 
-        results_flat = [item for sublist in results for item in sublist]
-        mean = statistics.mean(results_flat)
-        median = statistics.median(results_flat)
-        std = statistics.stdev(results_flat)
-        print('  Overall:')
-        print(f'    Mean:   {mean:.2f} ms')
-        print(f'    Median: {median:.2f} ms')
-        print(f'    Std:    {std:.2f} ms')
+    def _exp_2_plot_results(self, result_dir, notes):
+        # read the avg_window_results and delay_results from the csv file
+        with open(os.path.join(result_dir, 'results.csv'), 'r', newline='') as csvfile:
+            csv_reader = csv.reader(csvfile, delimiter=',')
+            rows = list(csv_reader)
+            num_rows = len(rows)
+            midpoint = num_rows//2 + 1
+            labels = rows[0]
+            avg_window_results = [[np.float64(value) for value in row] for row in rows[1:midpoint]]
+            delay_results = [[np.float64(value) for value in row] for row in rows[midpoint:]]
+        
+        avg_window_flat = [item for sublist in avg_window_results for item in sublist]
+        avg_window_mean = statistics.mean(avg_window_flat)
+        avg_window_median = statistics.median(avg_window_flat)
+        avg_window_std = statistics.stdev(avg_window_flat)
 
-        results.append(results_flat)
-        labels.append('all')
+        delay_flat = [item for sublist in delay_results for item in sublist]
+        delay_mean = statistics.mean(delay_flat)
+        delay_median = statistics.median(delay_flat)
+        delay_std = statistics.stdev(delay_flat)
+
+        print( '  Overall:')
+        print( '            Delay            Avg window')
+        print(f'    Mean:   {delay_mean:.2f} ms          {avg_window_mean:.2f} ms')
+        print(f'    Median: {delay_median:.2f} ms          {avg_window_median:.2f} ms')
+        print(f'    Std:    {delay_std:.2f} ms          {avg_window_std:.2f} ms')
+        
+        avg_window_results.append(avg_window_flat)
+        delay_results.append(delay_flat)
+        labels.append('All')
 
         # plot the results
-        fig, axis = plt.subplots(nrows=1, ncols=1)
-        self._violin_plot(axis, results, labels)
-        axis.set_xlabel('Load period (ms)')
-        axis.set_ylabel('History Length (ms)')
-        axis.set_title(f'History Length vs Load Period ({self.gpu_name})')
-        # add some texts at the bottom of the plot
-        axis.text(0.05, -0.1,  f'Mean history Length:   {mean:.2f} ms', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis.text(0.05, -0.15, f'Median history Length: {median:.2f} ms', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis.text(0.05, -0.2,  f'Std history Length:    {std:.2f} ms', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis.text(0.5, -0.15, f'GPU: {self.gpu_name}', transform=axis.transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        fig, axis = plt.subplots(nrows=2, ncols=1)
+        self._violin_plot(axis[0], avg_window_results, labels)
+        axis[0].set_xlabel('Load period (ms)')
+        axis[0].set_ylabel('Averaging windod (ms)')
+        axis[0].set_title(f'Averaging windod vs Load Period ({self.gpu_name})')
 
-        fig.set_size_inches(10, 6)
+        self._violin_plot(axis[1], delay_results, labels)
+        axis[1].set_xlabel('Load period (ms)')
+        axis[1].set_ylabel('Delay (ms)')
+        axis[1].set_title(f'Delay vs Load Period ({self.gpu_name})')
+
+        # add some texts at the bottom of the plot
+        axis[1].text(0.05, -0.15, f'Mean averaging window:   {avg_window_mean:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis[1].text(0.05, -0.2,  f'Median averaging window: {avg_window_median:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis[1].text(0.05, -0.25, f'Std averaging window:    {avg_window_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis[1].text(0.65,  -0.15, f'Mean delay:   {delay_mean:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis[1].text(0.65,  -0.2,  f'Median delay: {delay_median:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        axis[1].text(0.65,  -0.25, f'Std delay:    {delay_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+
+        fig.set_size_inches(12, 10)
         fname = f'history_length_{self.gpu_name}{notes}'
-        plt.savefig(os.path.join(self.result_dir, fname+'.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-        plt.savefig(os.path.join(self.result_dir, fname+'.svg'), format='svg', bbox_inches='tight')
+        plt.savefig(os.path.join(result_dir, fname+'.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(result_dir, fname+'.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
 
     def _violin_plot(self, ax, data, labels):
         def adjacent_values(vals, q1, q3):
-            upper_adjacent_value = q3 + (q3 - q1) * 1.5
+            IQR = q3 - q1
+            upper_adjacent_value = q3 + IQR * 1.5
             upper_adjacent_value = np.clip(upper_adjacent_value, q3, vals[-1])
 
-            lower_adjacent_value = q1 - (q3 - q1) * 1.5
+            lower_adjacent_value = q1 - IQR * 1.5
             lower_adjacent_value = np.clip(lower_adjacent_value, vals[0], q1)
             return lower_adjacent_value, upper_adjacent_value
 
@@ -602,6 +644,9 @@ class GPU_pwr_benchmark:
             ax.set_xticks(np.arange(1, len(labels) + 1))
             ax.set_xticklabels(labels, ha='center')
             ax.set_xlim(0.25, len(labels) + 0.75)
+
+        # sort the data
+        data = [sorted(row) for row in data]
 
         parts = ax.violinplot(
             data, showmeans=False, showmedians=False,
@@ -649,110 +694,26 @@ class GPU_pwr_benchmark:
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
 
-        loss_func = partial(self._reconstr_loss, load, power)
-        avg_window, delay = self._gradient_descent(
-                                loss_func,
-                                self.pwr_update_freq/2,
-                                self.nvsmi_smp_pd/200*self.pwr_update_freq,
-                                lr=load_period/10*self.pwr_update_freq)
+        reduced_power = power[power[' power.draw [W]'] != power[' power.draw [W]'].shift()]
+
+        loss_func = partial(self._reconstr_loss, load, reduced_power)
+
+        init_vars = [self.pwr_update_freq/2, self.nvsmi_smp_pd/200*self.pwr_update_freq]
+
+        avg_window, delay = minimize(loss_func, init_vars, method='Nelder-Mead', 
+                                    options={'maxiter': 1000, 'xatol': 1e-3, 'disp': self.verbose}).x
 
         if self.verbose:    print(f'modeled avg_window: {avg_window}ms, delay: {delay}ms')
 
-        self._plot_loss_function(loss_func, avg_window, int(np.ceil(delay)), result_dir)
+        reconstructed = self._reconstruction(load, reduced_power, avg_window, delay)
+        self._plot_reconstr_result(load_period, load, power, avg_window, delay, reconstructed, result_dir)
 
-        # reconstructed = self._reconstruction(load, power, history_length, delay)
-        # self._plot_reconstr_result(load_period, load, power, history_length, reconstructed, result_dir)
+        return avg_window, delay
 
-        return 20
+    def _reconstr_loss(self, load, power, variables, loss_type='MSE'):
+        if variables[0] < 0 or variables[1] < 0:    return 100
 
-        return history_length
-
-    def _plot_loss_function(self, loss_func, window_range, delay_range, store_path):        
-        fig, ax = plt.subplots(1, 1)
-        color_codes = ["#000080", "#0B2545", "#154360", "#1F618D", "#2980B9",
-                        "#3498DB", "#5DADE2", "#87CEEB", "#ADD8E6", "#D6EAF8", "#F0F8FF"]
-
-        window_range = 100
-        window_range = round(window_range / 5) * 5
-        if window_range <= 10:
-            window_range = (1, 21, 1)
-            ax.set_xticks(1, 21, 2)
-        else:
-            window_range = (window_range-99, window_range+101, 2)
-            ax.set_xticks(np.arange(window_range[0], window_range[1], 20))
-        windows = list(range(*window_range))
-
-        delay_range += 4
-        if delay_range >= 11:    delay_range = 11
-
-        for delay in range(0, delay_range):
-            print(f'plotting delay = {delay}ms')
-            losses = []
-            for window in windows:
-                losses.append(loss_func(window, delay))
-            ax.plot(windows, losses, label=f'delay = {delay}ms', color=color_codes[delay], zorder=10-delay)
-
-        ax.set_xlim(windows[0], windows[-1])
-        # ax.set_ylim(None, loss_func(windows[0], 2))
-        ax.set_xlabel('Average window duration (ms)')
-        ax.set_ylabel('Reconstruction loss (MSE)')
-        ax.set_title('Reconstruction loss vs. window duration and delay')
-        ax.legend(loc='upper right')
-        ax.grid(True, linestyle='--', linewidth=0.5)
-
-        fig.set_size_inches(8, 6)
-        plt.savefig(os.path.join(store_path, 'loss_function.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-        plt.savefig(os.path.join(store_path, 'loss_function.svg'), format='svg', bbox_inches='tight')
-        plt.close('all')
-
-    def _gradient_descent(self, loss_func, x_init, y_init, lr=200, h=0.05, threshold=1e-6, max_iter=200):
-        if self.verbose:    print('    Coarse search')
-        x = x_init
-        y = y_init
-
-        for i in range(10):
-            dx = (loss_func(x + h, y_init) - loss_func(x - h, y_init)) / (2 * h)
-            x -= lr * dx 
-            if x < 2*h:    x = 2*h
-            if self.verbose:    print(f'      Iteration {i:3}: x = {x:<.6f}, y = {y:<.6f}, dx = {abs(dx):<.4e}, loss = {loss_func(x, y_init):<.8f}')
-            if abs(dx) < threshold:    break
-
-        if self.verbose:    print('    Fine search')
-        var_track = [[x, y]]
-        loss_track = [loss_func(x, y)]
-        osc_ctr = 0
-
-        for i in range(max_iter):
-            dx = (loss_func(x + h, y) - loss_func(x - h, y)) / (2 * h)
-            dy = (loss_func(x, y + h) - loss_func(x, y - h)) / (2 * h)
-
-            x -= lr / (i*0.001+1.5) * dx
-            y -= lr / (i*0.005+1.5) * dy
-            if x < h:   x = h
-            if y < h:   y = h
-
-            # if the last 8 vartrac contains more than 3 items equal to h, then stop
-            osc_ctr += 1
-            if osc_ctr > 8 and np.sum(np.array(var_track[-8:]) == h) >= 3:
-                lr *= 0.75
-                osc_ctr = 0
-                print('reducing lr')
-
-            gm_grad = np.sqrt(dx**2 + dy**2)
-
-            loss = loss_func(x, y)
-            if self.verbose:    print(f'      Iteration {i:3}: x = {x:<.6f}, y = {y:<.6f}, dxdy = {gm_grad:.4e}, loss = {loss:<.8f}')
-            
-            var_track.append([x, y])
-            loss_track.append(loss)
-
-            if gm_grad < threshold:    break
-            if i > 5 and np.var(loss_track[-5:]) < 1e-18:    break
-
-        return var_track[np.argmin(loss_track)]
-
-    def _reconstr_loss(self, load, power, history_length, delay, loss_type='MSE'):
-        reconstructed = self._reconstruction(load, power, history_length, delay)
+        reconstructed = self._reconstruction(load, power, variables[0], variables[1])
 
         # discard the beginning 20% and the end 10% of the data
         power = power.iloc[int(len(power)*0.2):int(len(power)*0.9)]
@@ -772,51 +733,40 @@ class GPU_pwr_benchmark:
             raise Exception('Invalid loss type')    
 
     def _reconstruction(self, load, power, history_length, delay=0):
-        # copy the power df
         reconstructed = power.copy()
 
-        self.idle_pwr = 0
-        self.load_pwr = 1
-
-        load['power_draw'] = load['activity'].apply(lambda x: self.idle_pwr if x == 0 else self.load_pwr)
-        pwr_track = reconstructed[' power.draw [W]'].iloc[0]
-        reconstr_pwr = self.idle_pwr
         for index, row in reconstructed.iterrows():
             if row['timestamp'] <= 500:
-                reconstructed.loc[index, ' power.draw [W]'] = self.idle_pwr
+                reconstructed.loc[index, ' power.draw [W]'] = 0
             else:
-                if row[' power.draw [W]'] != pwr_track:
-                    pwr_track = row[' power.draw [W]']
-                    
-                    # find rows in load df that are within the past history_length of the current timestamp
-                    load_window = load[(load['timestamp'] >= row['timestamp'] - history_length - delay) 
-                                & (load['timestamp'] < row['timestamp'] - delay)].copy()
+                # find rows in load df that are within the past history_length of the current timestamp
+                load_window = load[(load['timestamp'] >= row['timestamp'] - history_length - delay) 
+                            & (load['timestamp'] < row['timestamp'] - delay)].copy()
 
-                    # interpolate the lower bound of the load window
-                    lb_t = row['timestamp'] - history_length - delay
-                    lb_0 = load[load['timestamp'] < lb_t].iloc[-1]
-                    lb_1 = load[load['timestamp'] >= lb_t].iloc[0]
-                    gradient = (lb_1['power_draw'] - lb_0['power_draw']) / (lb_1['timestamp'] - lb_0['timestamp'])
-                    lb_p = lb_0['power_draw'] + gradient * (lb_t - lb_0['timestamp'])
+                # interpolate the lower bound of the load window
+                lb_t = row['timestamp'] - history_length - delay
+                lb_0 = load[load['timestamp'] < lb_t].iloc[-1]
+                lb_1 = load[load['timestamp'] >= lb_t].iloc[0]
+                gradient = (lb_1['activity'] - lb_0['activity']) / (lb_1['timestamp'] - lb_0['timestamp'])
+                lb_p = lb_0['activity'] + gradient * (lb_t - lb_0['timestamp'])
 
-                    # interpolate the upper bound of the load window
-                    ub_t = row['timestamp'] - delay
-                    ub_0 = load[load['timestamp'] < ub_t].iloc[-1]
-                    ub_1 = load[load['timestamp'] >= ub_t].iloc[0]
-
-                    gradient = (ub_1['power_draw'] - ub_0['power_draw']) / (ub_1['timestamp'] - ub_0['timestamp'])
-                    ub_p = ub_0['power_draw'] + gradient * (ub_t - ub_0['timestamp'])
-                    
-                    # take the average of the load window
-                    t = np.concatenate((np.array([lb_t]), load_window['timestamp'].to_numpy(), np.array([ub_t])))
-                    p = np.concatenate((np.array([lb_p]), load_window['power_draw'].to_numpy(), np.array([ub_p])))
-                    reconstr_pwr = np.trapz(p, t) / history_length
+                # interpolate the upper bound of the load window
+                ub_t = row['timestamp'] - delay
+                ub_0 = load[load['timestamp'] < ub_t].iloc[-1]
+                ub_1 = load[load['timestamp'] >= ub_t].iloc[0]
+                gradient = (ub_1['activity'] - ub_0['activity']) / (ub_1['timestamp'] - ub_0['timestamp'])
+                ub_p = ub_0['activity'] + gradient * (ub_t - ub_0['timestamp'])
+                
+                # take the average of the load window
+                t = np.concatenate((np.array([lb_t]), load_window['timestamp'].to_numpy(), np.array([ub_t])))
+                p = np.concatenate((np.array([lb_p]), load_window['activity'].to_numpy(), np.array([ub_p])))
+                reconstr_pwr = np.trapz(p, t) / history_length
                 
                 reconstructed.loc[index, ' power.draw [W]'] = reconstr_pwr
 
         return reconstructed
 
-    def _plot_reconstr_result(self, load_period, load, power, history_length, reconstructed, store_path):
+    def _plot_reconstr_result(self, load_period, load, power, avg_window, delay, reconstructed, store_path):
         # Plot the results
         fig, axis = plt.subplots(nrows=3, ncols=1)
 
@@ -827,19 +777,25 @@ class GPU_pwr_benchmark:
         axis[0].grid(True, linestyle='--', linewidth=0.5)
         axis[0].set_xlim(0, load['timestamp'].max())
         axis[0].legend()
-        axis[0].set_title(f'{self.gpu_name} - {load_period} ms load window - modeled history length: {history_length:.2f} ms')
+        axis[0].set_title(f'{self.gpu_name} - {load_period} ms load window - modeled history length: {avg_window:.2f} ms, delay: {delay:.2f} ms')
         
-        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='power')
+        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='Power draw')
         axis[1].set_xlabel('Time (ms)')
         axis[1].set_ylabel('Power [W]')
         axis[1].grid(True, linestyle='--', linewidth=0.5)
         axis[1].set_xlim(axis[0].get_xlim())
+        axis[1].legend(loc='lower center')
 
-        axis[2].plot(reconstructed['timestamp'], reconstructed[' power.draw [W]'], label='reconstructed')
+        reconstructed = reconstructed.loc[reconstructed.index.repeat(2)].reset_index(drop=True)
+        reconstructed[' power.draw [W]'] = reconstructed[' power.draw [W]'].shift()
+        reconstructed = reconstructed.dropna().reset_index(drop=True)
+
+        axis[2].plot(reconstructed['timestamp'], reconstructed[' power.draw [W]'], label='Reconstructed power draw')
         axis[2].set_xlabel('Time (ms)')
         axis[2].set_ylabel('Power [W]')
         axis[2].grid(True, linestyle='--', linewidth=0.5)
         axis[2].set_xlim(axis[0].get_xlim())
+        axis[2].legend(loc='lower center')
 
         fig.set_size_inches(20, 12)
         plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
