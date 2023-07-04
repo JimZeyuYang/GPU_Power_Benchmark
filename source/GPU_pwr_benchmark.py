@@ -1,6 +1,7 @@
 import subprocess
 import pandas as pd
 from matplotlib import pyplot as plt
+from matplotlib import ticker
 import numpy as np
 import statistics
 from functools import partial
@@ -268,7 +269,7 @@ class GPU_pwr_benchmark:
                 # create the store path
                 percentage_store_path = os.path.join(self.result_dir, 'Experiment_1', f'{percentage}%_load')
                 os.makedirs(percentage_store_path)
-                scale_gradient, scale_intercept = self._find_scale_parameter(percentage_store_path, percentage)
+                # scale_gradient, scale_intercept = self._find_scale_parameter(percentage_store_path, percentage)
 
                 for rep in range(int(self.repetitions/4)):
                     print(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
@@ -276,7 +277,7 @@ class GPU_pwr_benchmark:
                     rep_store_path = os.path.join(percentage_store_path, f'rep_#{rep}')
                     os.makedirs(rep_store_path)
 
-                    niters = int(6000 * scale_gradient + scale_intercept)
+                    niters = int(6000 * self.scale_gradient + self.scale_intercept)
                     config = f'6000,{niters},1,{percentage}'
                     self._run_benchmark(1, config, rep_store_path, delay=False)
                     time.sleep(random.random())
@@ -336,11 +337,80 @@ class GPU_pwr_benchmark:
         print(self.result_dir.split("/")[-1])
 
         dir_list = os.listdir(self.result_dir)
-        # if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
+        if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
         if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'), notes)
 
     def _convert_pmd_data(self, dir):
-        pass
+        with open(os.path.join(dir, 'PMD_start_ts.txt'), 'r') as f:  pmd_start_ts = int(f.readline()) - 50000
+        with open(os.path.join(dir, 'PMD_data.bin'), 'rb') as f:     pmd_data = f.read()
+
+        bytes_per_sample = 18
+        num_samples = int(len(pmd_data) / bytes_per_sample)
+
+        # data_dict = {
+        #     'timestamp (us)' : [],
+        #     'pcie1_v': [], 'pcie1_i': [], 'pcie1_p': [],
+        #     'pcie2_v': [], 'pcie2_i': [], 'pcie2_p': [],
+        #     'eps1_v' : [], 'eps1_i' : [], 'eps1_p' : [],
+        #     'eps2_v' : [], 'eps2_i' : [], 'eps2_p' : [],
+        # }
+
+        data_dict = {'timestamp': [], 'pcie_total_p': [], 'eps_total_p': []}
+
+        last_timestamp = 0
+        timestamp = 0
+        for i in range(num_samples):
+            sample = pmd_data[i*bytes_per_sample:(i+1)*bytes_per_sample]
+
+            values = struct.unpack('<HHHHHHHHH', sample)
+            values = list(values)
+
+            timestamp += values[0] - last_timestamp
+            if values[0] < last_timestamp:  timestamp += 65536
+            last_timestamp = values[0]
+
+            # enumerate through the values and convert to signed values, begin at index 1
+            for i, value in enumerate(values[1:]):
+                signed = struct.unpack('<h', struct.pack('<H', value))[0]
+                signed = (signed >> 4) & 0x0FFF
+                if signed & (1 << 11):  signed = 0
+                values[i+1] = signed
+
+            # populate the dictionary
+            data_dict['timestamp'].append(timestamp / 2938)
+            data_dict['pcie_total_p'].append( values[1] * 0.007568 * values[2] * 0.0488
+                                        + values[3] * 0.007568 * values[4] * 0.0488
+                                        + values[7] * 0.007568 * values[8] * 0.0488)
+            data_dict['eps_total_p'].append(  values[5] * 0.0075 * values[6] * 0.0488)
+
+            # data_dict['timestamp (us)'].append(timestamp / 2.938)
+            # data_dict['pcie1_v'].append(values[1] * 0.007568)
+            # data_dict['pcie1_i'].append(values[2] * 0.0488)
+            # data_dict['pcie1_p'].append(data_dict['pcie1_v'][-1] * data_dict['pcie1_i'][-1])
+            # data_dict['pcie2_v'].append(values[3] * 0.007568)
+            # data_dict['pcie2_i'].append(values[4] * 0.0488)
+            # data_dict['pcie2_p'].append(data_dict['pcie2_v'][-1] * data_dict['pcie2_i'][-1])
+            # data_dict['eps1_v'].append(values[5] * 0.007568)
+            # data_dict['eps1_i'].append(values[6] * 0.0488)
+            # data_dict['eps1_p'].append(data_dict['eps1_v'][-1] * data_dict['eps1_i'][-1])
+            # data_dict['eps2_v'].append(values[7] * 0.007568)
+            # data_dict['eps2_i'].append(values[8] * 0.0488)
+            # data_dict['eps2_p'].append(data_dict['eps2_v'][-1] * data_dict['eps2_i'][-1])
+
+        df = pd.DataFrame(data_dict)
+
+        # df['timestamp (us)'] += (pmd_start_ts - df['timestamp (us)'][0])
+        # df['timestamp'] = (df['timestamp (us)'] / 1000)
+        df['timestamp'] += (pmd_start_ts/1000 - df['timestamp'][0])
+
+        # df['pcie_total_p'] = df['pcie1_p'] + df['pcie2_p'] + df['eps2_p']
+        # df['eps_total_p'] = df['eps1_p']
+        df['total_p'] = df['pcie_total_p'] + df['eps_total_p']
+
+        # df.drop(columns=['timestamp (us)', 'pcie1_v', 'pcie1_i', 'pcie1_p', 'pcie2_v', 'pcie2_i', 'pcie2_p', 'eps1_v', 'eps1_i', 'eps1_p', 'eps2_v', 'eps2_i', 'eps2_p'], axis=1, inplace=True)
+        # df.drop(columns=['pcie_total_p'], axis=1, inplace=True)
+
+        return df
 
     def process_exp_1(self, result_dir):
         print('  Processing experiment 1...')
@@ -363,84 +433,30 @@ class GPU_pwr_benchmark:
         # print(dir_list[0])
         # self._exp_1_plot_result(dir_list[0])
 
+        print('  Done')
+
     def _exp_1_plot_result(self, dir):
         def plot_PMD_data(dir, t0, t_max, power, axis):
-            with open(os.path.join(dir, 'PMD_start_ts.txt'), 'r') as f:  pmd_start_ts = int(f.readline()) - 50000
-            with open(os.path.join(dir, 'PMD_data.bin'), 'rb') as f:     pmd_data = f.read()
+            df = self._convert_pmd_data(dir)
 
-            bytes_per_sample = 18
-            num_samples = int(len(pmd_data) / bytes_per_sample)
-
-            data_dict = {
-                'timestamp (us)' : [],
-                'pcie1_v': [], 'pcie1_i': [], 'pcie1_p': [],
-                'pcie2_v': [], 'pcie2_i': [], 'pcie2_p': [],
-                'eps1_v' : [], 'eps1_i' : [], 'eps1_p' : [],
-                'eps2_v' : [], 'eps2_i' : [], 'eps2_p' : [],
-            }
-
-            last_timestamp = 0
-            timestamp = 0
-            for i in range(num_samples):
-                sample = pmd_data[i*bytes_per_sample:(i+1)*bytes_per_sample]
-
-                values = struct.unpack('<HHHHHHHHH', sample)
-                values = list(values)
-
-                timestamp += values[0] - last_timestamp
-                if values[0] < last_timestamp:  timestamp += 65536
-                last_timestamp = values[0]
-
-                # enumerate through the values and convert to signed values, begin at index 1
-                for i, value in enumerate(values[1:]):
-                    signed = struct.unpack('<h', struct.pack('<H', value))[0]
-                    signed = (signed >> 4) & 0x0FFF
-                    if signed & (1 << 11):  signed = 0
-                    values[i+1] = signed
-
-                # populate the dictionary
-                data_dict['timestamp (us)'].append(timestamp / 3)
-                data_dict['pcie1_v'].append(values[1] * 0.007568)
-                data_dict['pcie1_i'].append(values[2] * 0.0488)
-                data_dict['pcie1_p'].append(data_dict['pcie1_v'][-1] * data_dict['pcie1_i'][-1])
-                data_dict['pcie2_v'].append(values[3] * 0.007568)
-                data_dict['pcie2_i'].append(values[4] * 0.0488)
-                data_dict['pcie2_p'].append(data_dict['pcie2_v'][-1] * data_dict['pcie2_i'][-1])
-                data_dict['eps1_v'].append(values[5] * 0.007568)
-                data_dict['eps1_i'].append(values[6] * 0.0488)
-                data_dict['eps1_p'].append(data_dict['eps1_v'][-1] * data_dict['eps1_i'][-1])
-                data_dict['eps2_v'].append(values[7] * 0.007568)
-                data_dict['eps2_i'].append(values[8] * 0.0488)
-                data_dict['eps2_p'].append(data_dict['eps2_v'][-1] * data_dict['eps2_i'][-1])
-
-            df = pd.DataFrame(data_dict)
-
-            df['timestamp (us)'] += (pmd_start_ts - df['timestamp (us)'][0])
-            df['timestamp (ms)'] = (df['timestamp (us)'] / 1000)
-
-            df['timestamp (ms)'] -= t0
+            df['timestamp'] -= t0
             
-            df = df[(df['timestamp (ms)'] >= 0) & (df['timestamp (ms)'] <= t_max)]
-
-            df['pcie_total_p'] = df['pcie1_p'] + df['pcie2_p']
-            df['eps_total_p'] = df['eps1_p'] + df['eps2_p']
-            df['total_p'] = df['pcie_total_p'] + df['eps_total_p']
+            df = df[(df['timestamp'] >= 0) & (df['timestamp'] <= t_max)]
             
-            axis[1].fill_between(df['timestamp (ms)'], df['total_p'], df['eps_total_p'], alpha=0.5, label='Rower draw from PCIE power cables')
-            axis[1].fill_between(df['timestamp (ms)'], df['eps_total_p'], 0, alpha=0.5, label='Power draw from PCIE slot')
-            
+            axis[1].fill_between(df['timestamp'], df['total_p'], df['eps_total_p'], alpha=0.5, label='Rower draw from PCIE power cables')
+            axis[1].fill_between(df['timestamp'], df['eps_total_p'], 0, alpha=0.5, label='Power draw from PCIE slot')
             
             # iterate through df using iterrows
             last_timestamp = 0
             for index, row in power.iterrows():
-                df.loc[(df['timestamp (ms)'] > last_timestamp) & (df['timestamp (ms)'] <= row['timestamp']), 'nv_power'] = row[' power.draw [W]']
+                df.loc[(df['timestamp'] > last_timestamp) & (df['timestamp'] <= row['timestamp']), 'nv_power'] = row[' power.draw [W]']
                 last_timestamp = row['timestamp']
 
             df['nv_power_error'] = df['nv_power'] - df['total_p']
             mse = np.mean(df['nv_power_error']**2)
             # print('MSE: {}'.format(mse))
             
-            axis[2].fill_between(df['timestamp (ms)'], df['nv_power_error'], 0, alpha=1, label=f'Power reading error, MSE={mse:.2f}', color='red')
+            axis[2].fill_between(df['timestamp'], df['nv_power_error'], 0, alpha=1, label=f'Power reading error, MSE={mse:.2f}', color='red')
             axis[2].set_xlabel('Time (ms)')
             axis[2].set_ylabel('Difference [W]')
             axis[2].grid(True, linestyle='--', linewidth=0.5)
@@ -468,13 +484,13 @@ class GPU_pwr_benchmark:
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= t_max+10)]
 
-        PMD_exists = False
+        self.PMD = False
         if os.path.exists(os.path.join(dir, 'PMD_data.bin')) and os.path.exists(os.path.join(dir, 'PMD_start_ts.txt')):
-            PMD_exists = True
+            self.PMD = True
 
         # plotting
         n_rows = 2
-        if PMD_exists:    n_rows = 3
+        if self.PMD:    n_rows = 3
         fig, axis = plt.subplots(nrows=n_rows, ncols=1)
 
         axis[0].plot(load['timestamp'], load['activity']*100, label='load')
@@ -494,7 +510,7 @@ class GPU_pwr_benchmark:
         axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
 
         # check if PMD_data.bin and PMD_start_ts.txt exist
-        if PMD_exists:    plot_PMD_data(dir, t0, t_max, power, axis)
+        if self.PMD:    plot_PMD_data(dir, t0, t_max, power, axis)
 
         axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='Power draw reported by nvidia-smi', linewidth=2, color='black')
         axis[1].set_xlabel('Time (ms)')
@@ -509,67 +525,79 @@ class GPU_pwr_benchmark:
         plt.close('all')
 
     def process_exp_2(self, result_dir, notes):
+        print('  Processing experiment 2...')
         dir_list = os.listdir(result_dir)
         dir_list = [dir for dir in dir_list if dir.endswith('ms')]
         dir_list = sorted(dir_list, key=lambda dir: int(dir.split('_')[1]))
-        print(f'  Found {len(dir_list)-1} directories to process...')
-
-        avg_window_results = []
-        delay_results = []
-        labels = []
+        print(f'    Found {len(dir_list)-1} directories to process...')
+        
+        test_pmd_path = os.path.join(result_dir, dir_list[0], 'rep_#0')
+        self.PMD = False
+        if (os.path.exists(test_pmd_path) and os.path.exists(test_pmd_path)):
+            print('    Found PMD data')
+            self.PMD = True
 
         self.pwr_update_freq = int(statistics.median([int(dir.split('_')[1]) for dir in dir_list]))
-
-        
+        #'''
+        labels = []
+        args = []
         for dir in dir_list:
             load_pd = int(dir.split('_')[1])
-
             if load_pd == self.pwr_update_freq:    continue
 
-            print(f'  Processing results for load period of {load_pd} ms...')
             ratio_store_path = os.path.join(result_dir, dir)
             labels.append(f'{load_pd}')
-            
-            args = []
+
+            # self.repetitions = 2
             for rep in range(self.repetitions):
                 rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
                 args.append((rep_store_path, load_pd))
-
-            num_processes = min(self.repetitions, os.cpu_count())
-            pool = Pool(processes=num_processes)
-            results = pool.starmap(self._process_single_run, args)
-            pool.close()
-            pool.join()
-
-            avg_windows, delays = zip(*results)
-            avg_windows = list(avg_windows)
-            delays = list(delays) 
-
-            # find mean median and std of results
-            avg_window_mean = statistics.mean(avg_windows)
-            avg_window_median = statistics.median(avg_windows)
-            avg_window_std = statistics.stdev(avg_windows)
-
-            delay_mean = statistics.mean(delays)
-            delay_median = statistics.median(delays)
-            delay_std = statistics.stdev(delays)
-
-            print(f'            Delay            Avg window')
-            print(f'    Mean:   {delay_mean:.2f} ms          {avg_window_mean:.2f} ms')
-            print(f'    Median: {delay_median:.2f} ms          {avg_window_median:.2f} ms')
-            print(f'    Std:    {delay_std:.2f} ms          {avg_window_std:.2f} ms')
+            # break
             
-            avg_window_results.append(avg_windows)
-            delay_results.append(delays)
 
-        # store avg_window_results and delay_results in a csv file
-        with open(os.path.join(result_dir, 'results.csv'), 'w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile, delimiter=',')
-            csvwriter.writerow(labels)
-            for window in avg_window_results:    csvwriter.writerow(window)
-            for delay  in delay_results:         csvwriter.writerow(delay)
+        num_processes = min(len(args), os.cpu_count())
+        # num_processes = 1
+        print(f'    Running with {num_processes} processes', end='', flush=True)
         
+        pool = Pool(processes=num_processes)
+        results = pool.starmap(self._exp_2_process_single_run, args)
+        pool.close()
+        pool.join()
+        print('')
+
+        if not self.PMD:
+            avg_windows, delays = zip(*results)
+            avg_windows = [list(avg_windows)[i:i+self.repetitions] for i in range(0, len(list(avg_windows)), self.repetitions)]
+            delays = [list(delays)[i:i+self.repetitions] for i in range(0, len(list(delays)), self.repetitions)]
+            
+            # store avg_window and delay in a csv file
+            with open(os.path.join(result_dir, 'results.csv'), 'w', newline='') as csvfile:
+                csvwriter = csv.writer(csvfile, delimiter=',')
+                csvwriter.writerow(labels)
+                for window in avg_windows:    csvwriter.writerow(window)
+                for delay  in delays:         csvwriter.writerow(delay)
+        
+        else:
+            avg_windows, delays, PMD_avg_windows, PMD_delays, error = zip(*results)
+            avg_windows = [list(avg_windows)[i:i+self.repetitions] for i in range(0, len(list(avg_windows)), self.repetitions)]
+            delays = [list(delays)[i:i+self.repetitions] for i in range(0, len(list(delays)), self.repetitions)]
+            PMD_avg_windows = [list(PMD_avg_windows)[i:i+self.repetitions] for i in range(0, len(list(PMD_avg_windows)), self.repetitions)]
+            PMD_delays = [list(PMD_delays)[i:i+self.repetitions] for i in range(0, len(list(PMD_delays)), self.repetitions)]
+            error = [list(error)[i:i+self.repetitions] for i in range(0, len(list(error)), self.repetitions)]
+
+            # store avg_window and delay in a csv file
+            with open(os.path.join(result_dir, 'results.csv'), 'w', newline='') as csvfile:
+                csvwriter = csv.writer(csvfile, delimiter=',')
+                csvwriter.writerow(labels)
+                for window in avg_windows:        csvwriter.writerow(window)
+                for delay  in delays:             csvwriter.writerow(delay)
+                for window in PMD_avg_windows:    csvwriter.writerow(window)
+                for delay  in PMD_delays:         csvwriter.writerow(delay)
+                for err    in error:              csvwriter.writerow(err)
+        
+        # '''
         self._exp_2_plot_results(result_dir, notes)
+        print('  Done')
 
     def _exp_2_plot_results(self, result_dir, notes):
         # read the avg_window_results and delay_results from the csv file
@@ -577,10 +605,20 @@ class GPU_pwr_benchmark:
             csv_reader = csv.reader(csvfile, delimiter=',')
             rows = list(csv_reader)
             num_rows = len(rows)
-            midpoint = num_rows//2 + 1
-            labels = rows[0]
-            avg_window_results = [[np.float64(value) for value in row] for row in rows[1:midpoint]]
-            delay_results = [[np.float64(value) for value in row] for row in rows[midpoint:]]
+            if not self.PMD:
+                midpoint = num_rows//2 + 1
+                labels = rows[0]
+                avg_window_results = [[np.float64(value) for value in row] for row in rows[1:midpoint]]
+                delay_results = [[np.float64(value) for value in row] for row in rows[midpoint:]]
+            else:
+                stride = num_rows//5
+                labels = rows[0]
+                avg_window_results = [[np.float64(value) for value in row if not np.isnan(np.float64(value))] for row in rows[1:stride+1]]
+                delay_results = [[np.float64(value) for value in row if not np.isnan(np.float64(value))] for row in rows[stride+1:2*stride+1]]
+                PMD_avg_window_results = [[np.float64(value) for value in row if not np.isnan(np.float64(value))] for row in rows[2*stride+1:3*stride+1]]
+                PMD_delay_results = [[np.float64(value) for value in row if not np.isnan(np.float64(value))] for row in rows[3*stride+1:4*stride+1]]
+                error_results = [[np.float64(value) for value in row if not np.isnan(np.float64(value))] for row in rows[4*stride+1:]]
+                
         
         avg_window_flat = [item for sublist in avg_window_results for item in sublist]
         avg_window_mean = statistics.mean(avg_window_flat)
@@ -592,18 +630,47 @@ class GPU_pwr_benchmark:
         delay_median = statistics.median(delay_flat)
         delay_std = statistics.stdev(delay_flat)
 
-        print( '  Overall:')
-        print( '            Delay            Avg window')
-        print(f'    Mean:   {delay_mean:.2f} ms          {avg_window_mean:.2f} ms')
-        print(f'    Median: {delay_median:.2f} ms          {avg_window_median:.2f} ms')
-        print(f'    Std:    {delay_std:.2f} ms          {avg_window_std:.2f} ms')
-        
-        avg_window_results.append(avg_window_flat)
-        delay_results.append(delay_flat)
         labels.append('All')
+        avg_window_results.append(avg_window_flat)
+        delay_results.append(delay_flat)        
+
+        print( '  Overall:')
+        print( '            Delay           Avg window')
+        print(f'    Mean:   {delay_mean:.2f} ms         {avg_window_mean:.2f} ms')
+        print(f'    Median: {delay_median:.2f} ms         {avg_window_median:.2f} ms')
+        print(f'    Std:    {delay_std:.2f} ms         {avg_window_std:.2f} ms')        
+        
+        if self.PMD:
+            PMD_avg_window_flat = [item for sublist in PMD_avg_window_results for item in sublist]
+            PMD_avg_window_mean = statistics.mean(PMD_avg_window_flat)
+            PMD_avg_window_median = statistics.median(PMD_avg_window_flat)
+            PMD_avg_window_std = statistics.stdev(PMD_avg_window_flat)
+
+            PMD_delay_flat = [item for sublist in PMD_delay_results for item in sublist]
+            PMD_delay_mean = statistics.mean(PMD_delay_flat)
+            PMD_delay_median = statistics.median(PMD_delay_flat)
+            PMD_delay_std = statistics.stdev(PMD_delay_flat)
+
+            error_flat = [item for sublist in error_results for item in sublist]
+            error_mean = statistics.mean(error_flat)
+            error_median = statistics.median(error_flat)
+            error_std = statistics.stdev(error_flat)
+
+            PMD_avg_window_results.append(PMD_avg_window_flat)
+            PMD_delay_results.append(PMD_delay_flat)
+            error_results.append(error_flat)
+
+            print( '            PMD Delay       PMD Avg window  Error')
+            print(f'    Mean:   {PMD_delay_mean:.2f} ms         {PMD_avg_window_mean:.2f} ms         {error_mean:.2f}%')
+            print(f'    Median: {PMD_delay_median:.2f} ms         {PMD_avg_window_median:.2f} ms         {error_median:.2f}%')
+            print(f'    Std:    {PMD_delay_std:.2f} ms         {PMD_avg_window_std:.2f} ms         {error_std:.2f}%')
+
 
         # plot the results
-        fig, axis = plt.subplots(nrows=2, ncols=1)
+        if self.PMD:    n_rows = 5
+        else:           n_rows = 2
+
+        fig, axis = plt.subplots(nrows=n_rows, ncols=1)
         self._violin_plot(axis[0], avg_window_results, labels)
         axis[0].set_xlabel('Load period (ms)')
         axis[0].set_ylabel('Averaging windod (ms)')
@@ -614,15 +681,33 @@ class GPU_pwr_benchmark:
         axis[1].set_ylabel('Delay (ms)')
         axis[1].set_title(f'Delay vs Load Period ({self.gpu_name})')
 
-        # add some texts at the bottom of the plot
-        axis[1].text(0.05, -0.15, f'Mean averaging window:   {avg_window_mean:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis[1].text(0.05, -0.2,  f'Median averaging window: {avg_window_median:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis[1].text(0.05, -0.25, f'Std averaging window:    {avg_window_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis[1].text(0.65,  -0.15, f'Mean delay:   {delay_mean:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis[1].text(0.65,  -0.2,  f'Median delay: {delay_median:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
-        axis[1].text(0.65,  -0.25, f'Std delay:    {delay_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        if self.PMD:
+            self._violin_plot(axis[2], PMD_avg_window_results, labels)
+            axis[2].set_xlabel('Load period (ms)')
+            axis[2].set_ylabel('Averaging windod (ms)')
+            axis[2].set_title(f'PMD Averaging windod vs Load Period ({self.gpu_name})')
 
-        fig.set_size_inches(12, 10)
+            self._violin_plot(axis[3], PMD_delay_results, labels)
+            axis[3].set_xlabel('Load period (ms)')
+            axis[3].set_ylabel('Delay (ms)')
+            axis[3].set_title(f'PMD Delay vs Load Period ({self.gpu_name})')
+
+            self._violin_plot(axis[4], error_results, labels)
+            axis[4].set_xlabel('Load period (ms)')
+            axis[4].set_ylabel('Error (%)')
+            axis[4].set_title(f'Error of Energy, nvidia-smi compared to PMD')
+
+            
+
+        # add some texts at the bottom of the plot
+        # axis[1].text(0.05, -0.15, f'Mean averaging window:   {avg_window_mean:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        # axis[1].text(0.05, -0.2,  f'Median averaging window: {avg_window_median:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        # axis[1].text(0.05, -0.25, f'Std averaging window:    {avg_window_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        # axis[1].text(0.65,  -0.15, f'Mean delay:   {delay_mean:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        # axis[1].text(0.65,  -0.2,  f'Median delay: {delay_median:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        # axis[1].text(0.65,  -0.25, f'Std delay:    {delay_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+
+        fig.set_size_inches(12, 5*n_rows)
         fname = f'history_length_{self.gpu_name}{notes}'
         plt.savefig(os.path.join(result_dir, fname+'.jpg'), format='jpg', dpi=256, bbox_inches='tight')
         plt.savefig(os.path.join(result_dir, fname+'.svg'), format='svg', bbox_inches='tight')
@@ -676,7 +761,8 @@ class GPU_pwr_benchmark:
         set_axis_style(ax, labels)
         ax.grid(True, linestyle='--', linewidth=0.5)
 
-    def _process_single_run(self, result_dir, load_period):
+    def _exp_2_process_single_run(self, result_dir, load_period):
+        # Load data
         load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
         load.loc[-1] = load.loc[0] - 500000
         load.index = load.index + 1
@@ -687,28 +773,64 @@ class GPU_pwr_benchmark:
         load['timestamp'] -= t0
         load.loc[load.index[-1], 'timestamp'] += 500
         load.loc[load.index[-1], 'activity'] = 0
+        load.set_index('timestamp', inplace=True)
+        load.sort_index(inplace=True)
 
+        # nv_smi power data
         power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
         power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
         if self.BST:    power['timestamp'] -= 60*60*1000
         power['timestamp'] -= t0
-        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load['timestamp'].iloc[-1])]
+        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load.index[-1])]
+        power.set_index('timestamp', inplace=True)
+        power.sort_index(inplace=True)
 
-        reduced_power = power[power[' power.draw [W]'] != power[' power.draw [W]'].shift()]
-
+        # Optimization
+        reduced_power = power[power[' power.draw [W]'] != power[' power.draw [W]'].shift()].copy()
+        reduced_power.drop(columns=[' utilization.gpu [%]', ' pstate', ' temperature.gpu', ' clocks.current.sm [MHz]'], axis=1, inplace=True)
         loss_func = partial(self._reconstr_loss, load, reduced_power)
 
-        init_vars = [self.pwr_update_freq/2, self.nvsmi_smp_pd/200*self.pwr_update_freq]
-
+        init_vars = [self.pwr_update_freq/2, self.nvsmi_smp_pd/2]
         avg_window, delay = minimize(loss_func, init_vars, method='Nelder-Mead', 
                                     options={'maxiter': 1000, 'xatol': 1e-3, 'disp': self.verbose}).x
 
-        if self.verbose:    print(f'modeled avg_window: {avg_window}ms, delay: {delay}ms')
-
+        if self.verbose:    print(f'modeled avg_window: {avg_window:.2f}ms, delay: {delay:.2f}ms')
         reconstructed = self._reconstruction(load, reduced_power, avg_window, delay)
-        self._plot_reconstr_result(load_period, load, power, avg_window, delay, reconstructed, result_dir)
 
-        return avg_window, delay
+        # PMD data
+        PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error , error_msg = None, 0, 0, None, 0, None
+        if self.PMD:
+            PMD_data = self._convert_pmd_data(result_dir)
+            PMD_data['timestamp'] -= t0
+            PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
+            PMD_data.set_index('timestamp', inplace=True)
+            PMD_data.sort_index(inplace=True)
+
+            PMD_cp = PMD_data[['total_p']].copy()
+            PMD_cp.rename(columns={'total_p': 'activity'}, inplace=True)
+            loss_func = partial(self._reconstr_loss, PMD_cp, reduced_power)
+
+            PMD_avg_window, PMD_delay = minimize(loss_func, init_vars, method='Nelder-Mead',
+                                        options={'maxiter': 1000, 'xatol': 1e-3, 'disp': self.verbose}).x
+
+            if self.verbose:    print(f'modeled avg_window: {PMD_avg_window:.2f}ms, delay: {PMD_delay:.2f}ms')
+            PMD_reconstructed = self._reconstruction(PMD_cp, reduced_power, PMD_avg_window, PMD_delay)
+
+            # compare what you get in energy when integrating the power signal
+            nv_energy = np.trapz(power[' power.draw [W]'], power.index) / 1000
+            pmd_energy = np.trapz(PMD_cp['activity'], PMD_cp.index) / 1000
+            error = (nv_energy - pmd_energy) / pmd_energy * 100
+            error_msg = f'nv_energy: {nv_energy:.2f} J, pmd_energy: {pmd_energy:.2f} J, diff: {nv_energy - pmd_energy:.2f} J, error: {error:.2f}%'
+            if self.verbose:    print(error_msg)
+            if abs(error) > 10:      print(f'error is too high: {error:.2f}%, check dir {result_dir}')
+        
+        # Plot resontruction result
+        self._plot_reconstr_result(load_period, load, power, avg_window, delay, reconstructed, result_dir,
+                                                PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg)
+        print('.', end='', flush=True)
+        if abs(error) > 10:  return avg_window, delay, np.nan, np.nan, np.nan
+        if self.PMD:    return avg_window, delay, PMD_avg_window, PMD_delay, error
+        else:           return avg_window, delay
 
     def _reconstr_loss(self, load, power, variables, loss_type='MSE'):
         if variables[0] < 0 or variables[1] < 0:    return 100
@@ -735,69 +857,115 @@ class GPU_pwr_benchmark:
     def _reconstruction(self, load, power, history_length, delay=0):
         reconstructed = power.copy()
 
-        for index, row in reconstructed.iterrows():
-            if row['timestamp'] <= 500:
-                reconstructed.loc[index, ' power.draw [W]'] = 0
+        for idx, row in reconstructed.iterrows():
+            if idx <= 500:
+                # find the first row in load that is after the current timestamp
+                after = load[load.index >= idx].iloc[0]
+                before = load[load.index <= idx]
+                if before.empty:    reconstructed.loc[idx, ' power.draw [W]'] = after['activity']
+                else:               reconstructed.loc[idx, ' power.draw [W]'] = (after['activity'] + before.iloc[-1]['activity']) / 2
+                
             else:
                 # find rows in load df that are within the past history_length of the current timestamp
-                load_window = load[(load['timestamp'] >= row['timestamp'] - history_length - delay) 
-                            & (load['timestamp'] < row['timestamp'] - delay)].copy()
+                load_window = load[(load.index >= idx - history_length - delay) & (load.index < idx - delay)].copy()
 
                 # interpolate the lower bound of the load window
-                lb_t = row['timestamp'] - history_length - delay
-                lb_0 = load[load['timestamp'] < lb_t].iloc[-1]
-                lb_1 = load[load['timestamp'] >= lb_t].iloc[0]
-                gradient = (lb_1['activity'] - lb_0['activity']) / (lb_1['timestamp'] - lb_0['timestamp'])
-                lb_p = lb_0['activity'] + gradient * (lb_t - lb_0['timestamp'])
+                lb_t = idx - history_length - delay
+                lb_0 = load[load.index < lb_t].iloc[-1]
+                lb_1 = load[load.index >= lb_t]
+                if lb_1.empty:    lb_p = lb_0['activity']
+                else:
+                    lb_1 = lb_1.iloc[0]
+                    gradient = (lb_1['activity'] - lb_0['activity']) / (lb_1.name - lb_0.name)
+                    lb_p = lb_0['activity'] + gradient * (lb_t - lb_0.name)
 
                 # interpolate the upper bound of the load window
-                ub_t = row['timestamp'] - delay
-                ub_0 = load[load['timestamp'] < ub_t].iloc[-1]
-                ub_1 = load[load['timestamp'] >= ub_t].iloc[0]
-                gradient = (ub_1['activity'] - ub_0['activity']) / (ub_1['timestamp'] - ub_0['timestamp'])
-                ub_p = ub_0['activity'] + gradient * (ub_t - ub_0['timestamp'])
+                ub_t = idx - delay
+                ub_0 = load[load.index < ub_t].iloc[-1]
+                ub_1 = load[load.index >= ub_t]
+                if ub_1.empty:    ub_p = ub_0['activity']
+                else:
+                    ub_1 = ub_1.iloc[0]
+                    gradient = (ub_1['activity'] - ub_0['activity']) / (ub_1.name - ub_0.name)
+                    ub_p = ub_0['activity'] + gradient * (ub_t - ub_0.name)
                 
                 # take the average of the load window
-                t = np.concatenate((np.array([lb_t]), load_window['timestamp'].to_numpy(), np.array([ub_t])))
+                t = np.concatenate((np.array([lb_t]), load_window.index.to_numpy(), np.array([ub_t])))
                 p = np.concatenate((np.array([lb_p]), load_window['activity'].to_numpy(), np.array([ub_p])))
                 reconstr_pwr = np.trapz(p, t) / history_length
                 
-                reconstructed.loc[index, ' power.draw [W]'] = reconstr_pwr
+                reconstructed.loc[idx, ' power.draw [W]'] = reconstr_pwr
 
         return reconstructed
 
-    def _plot_reconstr_result(self, load_period, load, power, avg_window, delay, reconstructed, store_path):
-        # Plot the results
-        fig, axis = plt.subplots(nrows=3, ncols=1)
+    def _plot_reconstr_result(self, load_period, load, power, avg_window, delay, reconstructed, store_path,
+                                PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
 
-        axis[0].plot(load['timestamp'], load['activity']*100, label='load')
-        axis[0].plot(power['timestamp'], power[' utilization.gpu [%]'], label='utilization.gpu [%]')
+        
+        if self.PMD:    n_rows = 4
+        else:           n_rows = 3
+        # Plot the results
+        fig, axis = plt.subplots(nrows=n_rows, ncols=1)
+
+        axis[0].plot(load.index, load['activity']*100, label='load')
+        axis[0].plot(power.index, power[' utilization.gpu [%]'], label='utilization.gpu [%]')
         axis[0].set_xlabel('Time (ms)')
         axis[0].set_ylabel('Load')
         axis[0].grid(True, linestyle='--', linewidth=0.5)
-        axis[0].set_xlim(0, load['timestamp'].max())
-        axis[0].legend()
-        axis[0].set_title(f'{self.gpu_name} - {load_period} ms load window - modeled history length: {avg_window:.2f} ms, delay: {delay:.2f} ms')
+        axis[0].set_xlim(0, load.index.max())
+        axis[0].legend(loc='upper right')
+        axis[0].set_title(f'{self.gpu_name} - {load_period} ms load window')
         
-        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='Power draw')
+        axis[1].plot(power.index, power[' power.draw [W]'], label='Power draw')
         axis[1].set_xlabel('Time (ms)')
         axis[1].set_ylabel('Power [W]')
         axis[1].grid(True, linestyle='--', linewidth=0.5)
         axis[1].set_xlim(axis[0].get_xlim())
         axis[1].legend(loc='lower center')
 
-        reconstructed = reconstructed.loc[reconstructed.index.repeat(2)].reset_index(drop=True)
+        reconstructed = reconstructed.loc[reconstructed.index.repeat(2)]
         reconstructed[' power.draw [W]'] = reconstructed[' power.draw [W]'].shift()
-        reconstructed = reconstructed.dropna().reset_index(drop=True)
+        reconstructed = reconstructed.dropna()
 
-        axis[2].plot(reconstructed['timestamp'], reconstructed[' power.draw [W]'], label='Reconstructed power draw')
+        axis[2].plot(reconstructed.index, reconstructed[' power.draw [W]'], label='Reconstructed power draw')
         axis[2].set_xlabel('Time (ms)')
         axis[2].set_ylabel('Power [W]')
         axis[2].grid(True, linestyle='--', linewidth=0.5)
         axis[2].set_xlim(axis[0].get_xlim())
         axis[2].legend(loc='lower center')
 
-        fig.set_size_inches(20, 12)
+        if self.PMD:
+            # plot a secondary axis for axies[0]
+            ax0_2 = axis[0].twinx()
+
+            ax0_2.fill_between(PMD_data.index, PMD_data['total_p'], PMD_data['eps_total_p'], alpha=0.5, label='Rower draw from PCIE power cables')
+            ax0_2.fill_between(PMD_data.index, PMD_data['eps_total_p'], 0, alpha=0.5, label='Power draw from PCIE slot')
+            ax0_2.set_xlabel('Time (ms)')
+            ax0_2.set_ylabel('Power [W]')
+            ax0_2.set_xlim(axis[0].get_xlim())
+            ax0_2.legend(loc='lower right')
+            
+
+            PMD_reconstructed = PMD_reconstructed.loc[PMD_reconstructed.index.repeat(2)]
+            PMD_reconstructed[' power.draw [W]'] = PMD_reconstructed[' power.draw [W]'].shift()
+            PMD_reconstructed = PMD_reconstructed.dropna()
+
+            axis[3].plot(PMD_reconstructed.index, PMD_reconstructed[' power.draw [W]'], label='Reconstructed power draw from PMD data')
+            axis[3].set_xlabel('Time (ms)')
+            axis[3].set_ylabel('Power [W]')
+            axis[3].grid(True, linestyle='--', linewidth=0.5)
+            axis[3].set_xlim(axis[0].get_xlim())
+            axis[3].legend(loc='lower center')
+
+            
+            axis[3].text(0.05, -0.15, f'Modeled history length: {avg_window:.2f} ms, delay: {delay:.2f} ms', transform=axis[3].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+            axis[3].text(0.05, -0.2,  f'PMD modeled history length: {PMD_avg_window:.2f} ms, delay: {PMD_delay:.2f} ms', transform=axis[3].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+            axis[3].text(0.05, -0.25, error_msg, transform=axis[3].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+        else:
+            axis[2].text(0.05, -0.15, f'Modeled history length: {avg_window:.2f} ms, delay: {delay:.2f} ms', transform=axis[2].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
+
+
+        fig.set_size_inches(20, 5*n_rows)
         plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
         plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
