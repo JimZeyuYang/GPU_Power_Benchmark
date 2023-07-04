@@ -46,7 +46,7 @@ class GPU_pwr_benchmark:
         self.nvsmi_time = datetime.strptime(self.nvsmi_time, datetime_format)
         self.nvsmi_time = int(self.nvsmi_time.timestamp())
         diff_hr = round((self.epoch_time - self.nvsmi_time)/3600)
-        with open(path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'w') as f:
+        with open(os.path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'w') as f:
             f.write(diff_hr)
 
         if not os.path.exists('/tmp'): os.makedirs('/tmp')
