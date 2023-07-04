@@ -6,6 +6,7 @@ import numpy as np
 import statistics
 from functools import partial
 import time
+from datetime import datetime
 import random
 import os
 from multiprocessing import Pool
@@ -18,7 +19,6 @@ class GPU_pwr_benchmark:
         print('_________________________')
         print('Initializing benchmark...')
         self.verbose = verbose
-        self.BST = True
         self.repetitions = 64
         self.nvsmi_smp_pd = 5
         self.sw_meas = sw_meas
@@ -42,6 +42,12 @@ class GPU_pwr_benchmark:
         self._log('___________________________')
         self._log('Preparing for experiment...')
 
+        datetime_format = '%Y/%m/%d %H:%M:%S.%f'
+        self.nvsmi_time = datetime.strptime(self.nvsmi_time, datetime_format)
+        self.nvsmi_time = int(self.nvsmi_time.timestamp())
+        diff_hr = round((self.epoch_time - self.nvsmi_time)/3600)
+        with open(path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'w') as f:
+            f.write(diff_hr)
 
         if not os.path.exists('/tmp'): os.makedirs('/tmp')
         self._recompile_load()
@@ -89,9 +95,10 @@ class GPU_pwr_benchmark:
         print()
 
     def _get_machine_info(self):
-        result = subprocess.run(['nvidia-smi', '--id=0', '--query-gpu=name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
+        self.epoch_time = time.time()
+        result = subprocess.run(['nvidia-smi', '--id=0', '--query-gpu=timestamp,name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
         output = result.stdout.decode().split('\n')[0].split(', ')
-        self.gpu_name, self.gpu_serial, self.gpu_uuid, self.driver_version = output
+        self.nvsmi_time, self.gpu_name, self.gpu_serial, self.gpu_uuid, self.driver_version = output
         self.gpu_name = self.gpu_name.replace(' ', '_')
 
         try:
@@ -335,6 +342,8 @@ class GPU_pwr_benchmark:
             self.gpu_name = file_list[0].split('_run_')[0]
 
         print(self.result_dir.split("/")[-1])
+        with open(os.path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'r') as f:  self.jet_lag = int(f.readline())
+        print(f'Jet lag: {self.jet_lag} hours')
 
         dir_list = os.listdir(self.result_dir)
         if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
@@ -480,7 +489,7 @@ class GPU_pwr_benchmark:
 
         power = pd.read_csv(os.path.join(dir, 'gpudata.csv'))
         power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-        if self.BST:    power['timestamp'] -= 60*60*1000
+        power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= t_max+10)]
 
@@ -533,7 +542,7 @@ class GPU_pwr_benchmark:
         
         test_pmd_path = os.path.join(result_dir, dir_list[0], 'rep_#0')
         self.PMD = False
-        if (os.path.exists(test_pmd_path) and os.path.exists(test_pmd_path)):
+        if os.path.exists(os.path.join(test_pmd_path, 'PMD_data.bin')) and os.path.exists(os.path.join(test_pmd_path, 'PMD_start_ts.txt')):
             print('    Found PMD data')
             self.PMD = True
 
@@ -779,7 +788,7 @@ class GPU_pwr_benchmark:
         # nv_smi power data
         power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
         power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-        if self.BST:    power['timestamp'] -= 60*60*1000
+        power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load.index[-1])]
         power.set_index('timestamp', inplace=True)
