@@ -19,11 +19,11 @@ class GPU_pwr_benchmark:
         print('_________________________')
         print('Initializing benchmark...')
         self.verbose = verbose
-        self.repetitions = 64
+        self.repetitions = 32
         self.nvsmi_smp_pd = 5
         self.sw_meas = sw_meas
         self.PMD = PMD
-        self.aliasing_ratios = [2/3, 3/4, 4/5, 1, 6/5, 5/4, 4/3]
+        self.aliasing_ratios = [1/2, 2/3, 4/5, 6/5, 4/3]
         
     def prepare_experiment(self):
         self._get_machine_info()
