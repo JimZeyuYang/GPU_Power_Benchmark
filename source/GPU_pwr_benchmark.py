@@ -6,7 +6,7 @@ import numpy as np
 import statistics
 from functools import partial
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import random
 import os
 from multiprocessing import Pool
@@ -42,9 +42,9 @@ class GPU_pwr_benchmark:
         self._log('___________________________')
         self._log('Preparing for experiment...')
 
-        datetime_format = '%Y/%m/%d %H:%M:%S.%f'
-        self.nvsmi_time = datetime.strptime(self.nvsmi_time, datetime_format)
-        self.nvsmi_time = int(self.nvsmi_time.timestamp())
+
+        self.nvsmi_time = datetime.strptime(self.nvsmi_time, '%Y/%m/%d %H:%M:%S.%f')
+        self.nvsmi_time = self.nvsmi_time.replace(tzinfo=timezone.utc).timestamp()
         diff_hr = round((self.epoch_time - self.nvsmi_time)/3600)
         with open(os.path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'w') as f:
             f.write(str(diff_hr))
@@ -187,7 +187,7 @@ class GPU_pwr_benchmark:
             if duration > 2:
                 duration_list.append(duration)
                 niter_list.append(niter)
-            niter = int(niter * 1.5)
+            niter = int(niter * 2)
 
 
         # Linear regression
@@ -435,12 +435,14 @@ class GPU_pwr_benchmark:
         
         num_processes = min(self.repetitions, os.cpu_count())
         pool = Pool(processes=num_processes)
-        pool.map(self._exp_1_plot_result, dir_list)
+        results = pool.map(self._exp_1_plot_result, dir_list)
         pool.close()
         pool.join()
 
-        # print(dir_list[0])
-        # self._exp_1_plot_result(dir_list[0])
+        print('    Rise time:', statistics.mean(results), 'ms')
+
+        
+        # print(self._exp_1_plot_result(dir_list[0]))
 
         print('  Done')
 
@@ -472,7 +474,31 @@ class GPU_pwr_benchmark:
             axis[2].set_xlim(axis[0].get_xlim())
             axis[2].legend()
             # END OF THE FUNCTION
+        
+        def find_rise_time(power):
+            reduced_power = power[power['timestamp'] < 3000].copy()
+            reduced_power = reduced_power[reduced_power[' power.draw [W]'] != reduced_power[' power.draw [W]'].shift()]
+            reduced_power['pwr_diff'] = reduced_power[' power.draw [W]'].diff()
+            # remove the power.draw column from the dataframe
+            reduced_power.drop(columns=[' power.draw [W]', ' utilization.gpu [%]', ' pstate', ' temperature.gpu', ' clocks.current.sm [MHz]'], axis=1, inplace=True)
+            reduced_power.reset_index(drop=True, inplace=True)
 
+            start_ts, end_ts = 0, 0
+            started = False
+            for index, row in reduced_power.iterrows():
+                if index == len(reduced_power) - 1:    break
+
+                if started and row['pwr_diff'] < 1 and reduced_power['pwr_diff'].iloc[index+1] < 1:
+                    end_ts = row['timestamp']
+                    break
+                
+                if not started and row['pwr_diff'] > 1 and reduced_power['pwr_diff'].iloc[index+1] > 1:
+                    start_ts = row['timestamp']
+                    started = True
+
+            return end_ts - start_ts
+
+            # END OF THE FUNCTION
         load_percentage = dir.split('/')[-2].split('%')[0]
 
         load = pd.read_csv(os.path.join(dir, 'timestamps.csv'))
@@ -492,6 +518,7 @@ class GPU_pwr_benchmark:
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= t_max+10)]
+        rise_time = find_rise_time(power)
 
         self.PMD = False
         if os.path.exists(os.path.join(dir, 'PMD_data.bin')) and os.path.exists(os.path.join(dir, 'PMD_start_ts.txt')):
@@ -532,6 +559,8 @@ class GPU_pwr_benchmark:
         plt.savefig(os.path.join(dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
         plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
+
+        return rise_time
 
     def process_exp_2(self, result_dir, notes):
         print('  Processing experiment 2...')

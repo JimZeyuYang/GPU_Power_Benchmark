@@ -38,7 +38,7 @@ def experiment(args):
             experiments = [1, 2]
 
         for experiment in experiments:  benchmark.run_experiment(experiment)
-        if args.plot:  benchmark.plot_results()
+        if args.plot:  benchmark.process_results()
 
     elif args.plot:
         if args.gpu is None:

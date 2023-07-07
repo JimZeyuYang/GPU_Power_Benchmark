@@ -35,7 +35,7 @@ gpudata_dir=$result_dir/gpudata.csv
 if [ $software_measurement == "nvidia-smi" ]; then
     # Run the nvidia-smi command in the background
     # echo "Running nvidia-smi measurement in the background..."
-    nvidia-smi --id=0 --query-gpu=timestamp,power.draw,utilization.gpu,pstate,temperature.gpu,clocks.current.sm --format=csv,nounits -f $gpudata_dir -lms $sampling_pd &
+    nvidia-smi --id=0 --query-gpu=timestamp,power.draw,power.draw.average,power.draw.instant,utilization.gpu,pstate,temperature.gpu,clocks.current.sm --format=csv,nounits -f $gpudata_dir -lms $sampling_pd &
     nvidia_pid=$!
 
     # check if nvdia-smi started successfully
