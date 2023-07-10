@@ -137,14 +137,15 @@ class GPU_pwr_benchmark:
         output = output.stdout.decode()
         query_options = '--query-gpu='
         for key, value in self.pwr_draw_options.items():
-            if bool(output.find(key)):
+            if output.find(key) != -1:
                 query_options += key + ','
+                self.pwr_draw_options[key] = True
 
         output = subprocess.run(['nvidia-smi', query_options, '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
         output = output.stdout.decode()[:-1].split(', ')
 
         for i, (key, value) in enumerate(self.pwr_draw_options.items()):
-            self.pwr_draw_options[key] = is_number(output[i])
+            if value:    self.pwr_draw_options[key] = is_number(output[i])
 
     def _run_benchmark(self, experiment, config, store_path, delay=True):
         '''
