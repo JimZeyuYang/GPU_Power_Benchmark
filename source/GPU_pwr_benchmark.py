@@ -141,7 +141,7 @@ class GPU_pwr_benchmark:
                 query_options += key + ','
                 self.pwr_draw_options[key] = True
 
-        output = subprocess.run(['nvidia-smi', query_options, '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
+        output = subprocess.run(['nvidia-smi', '--id=0', query_options, '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
         output = output.stdout.decode()[:-1].split(', ')
 
         for i, (key, value) in enumerate(self.pwr_draw_options.items()):
@@ -531,6 +531,8 @@ class GPU_pwr_benchmark:
 
         if len(rise_times) == 1 and rise_times[0] > 900:
             return False
+        else:
+            return True
 
     def _exp_1_plot_result(self, dir):
         def plot_PMD_data(dir, t0, t_max, power, axis):
@@ -1120,7 +1122,6 @@ class GPU_pwr_benchmark:
         pool.map(self._exp_2_plot_power_data, dirs)
         pool.close()
         pool.join()
-
 
     def _exp_2_plot_power_data(self, result_dir):
         # Load data
