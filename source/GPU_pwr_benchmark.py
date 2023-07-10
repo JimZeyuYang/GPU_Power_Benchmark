@@ -638,8 +638,9 @@ class GPU_pwr_benchmark:
         axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
 
         # check if PMD_data.bin and PMD_start_ts.txt exist
-        if self.found_PMD:    ss_errs = plot_PMD_data(dir, t0, t_max, power, axis)
-        for err in ss_errs:    results.append(err)
+        if self.found_PMD:    
+            ss_errs = plot_PMD_data(dir, t0, t_max, power, axis)
+            for err in ss_errs:    results.append(err)
 
         for key, value in self.pwr_draw_options.items():
             if value:    axis[1].plot(power['timestamp'], power[f' {key} [W]'], label=f'{key} [W]', linewidth=2)        
