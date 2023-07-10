@@ -502,9 +502,9 @@ class GPU_pwr_benchmark:
                         for dir in dir_list 
                             for subdir in subdir_list]
 
-        self.PMD = False
+        self.found_PMD = False
         if os.path.exists(os.path.join(dir_list[0], 'PMD_data.bin')) and os.path.exists(os.path.join(dir_list[0], 'PMD_start_ts.txt')):
-            self.PMD = True
+            self.found_PMD = True
         
         num_processes = min(self.repetitions, os.cpu_count())
         pool = Pool(processes=num_processes)
@@ -521,7 +521,7 @@ class GPU_pwr_benchmark:
                 rise_times.append(statistics.mean(rise_time))
                 print(f'    {key} rise time: {statistics.mean(rise_time):.2f} ms')
         
-        if self.PMD:
+        if self.found_PMD:
             for key, value in self.pwr_draw_options.items():
                 if value:
                     ss_err = results.pop(0)
@@ -618,7 +618,7 @@ class GPU_pwr_benchmark:
 
         # plotting
         n_rows = 2
-        if self.PMD:    n_rows = 3
+        if self.found_PMD:    n_rows = 3
         fig, axis = plt.subplots(nrows=n_rows, ncols=1)
 
         axis[0].plot(load['timestamp'], load['activity']*100, label='load')
@@ -638,7 +638,7 @@ class GPU_pwr_benchmark:
         axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
 
         # check if PMD_data.bin and PMD_start_ts.txt exist
-        if self.PMD:    ss_errs = plot_PMD_data(dir, t0, t_max, power, axis)
+        if self.found_PMD:    ss_errs = plot_PMD_data(dir, t0, t_max, power, axis)
         for err in ss_errs:    results.append(err)
 
         for key, value in self.pwr_draw_options.items():
@@ -667,10 +667,10 @@ class GPU_pwr_benchmark:
         dir_list = sorted(dir_list, key=lambda dir: int(dir.split('_')[1]))
         
         test_pmd_path = os.path.join(result_dir, dir_list[0], 'rep_#0')
-        self.PMD = False
+        self.found_PMD = False
         if os.path.exists(os.path.join(test_pmd_path, 'PMD_data.bin')) and os.path.exists(os.path.join(test_pmd_path, 'PMD_start_ts.txt')):
             print('    Found PMD data')
-            self.PMD = True
+            self.found_PMD = True
             
 
         plotting_only = dir_list.pop(0)
@@ -706,7 +706,7 @@ class GPU_pwr_benchmark:
         pool.join()
         print('')
 
-        if not self.PMD:
+        if not self.found_PMD:
             avg_windows, delays = zip(*results)
             avg_windows = [list(avg_windows)[i:i+self.repetitions] for i in range(0, len(list(avg_windows)), self.repetitions)]
             delays = [list(delays)[i:i+self.repetitions] for i in range(0, len(list(delays)), self.repetitions)]
@@ -746,7 +746,7 @@ class GPU_pwr_benchmark:
             csv_reader = csv.reader(csvfile, delimiter=',')
             rows = list(csv_reader)
             num_rows = len(rows)
-            if not self.PMD:
+            if not self.found_PMD:
                 midpoint = num_rows//2 + 1
                 labels = rows[0]
                 avg_window_results = [[np.float64(value) for value in row] for row in rows[1:midpoint]]
@@ -781,7 +781,7 @@ class GPU_pwr_benchmark:
         print(f'    Median: {delay_median:.2f} ms         {avg_window_median:.2f} ms')
         print(f'    Std:    {delay_std:.2f} ms         {avg_window_std:.2f} ms')        
         
-        if self.PMD:
+        if self.found_PMD:
             PMD_avg_window_flat = [item for sublist in PMD_avg_window_results for item in sublist]
             PMD_avg_window_mean = statistics.mean(PMD_avg_window_flat)
             PMD_avg_window_median = statistics.median(PMD_avg_window_flat)
@@ -808,7 +808,7 @@ class GPU_pwr_benchmark:
 
 
         # plot the results
-        if self.PMD:    n_rows = 5
+        if self.found_PMD:    n_rows = 5
         else:           n_rows = 2
 
         fig, axis = plt.subplots(nrows=n_rows, ncols=1)
@@ -822,7 +822,7 @@ class GPU_pwr_benchmark:
         axis[1].set_ylabel('Delay (ms)')
         axis[1].set_title(f'Delay vs Load Period ({self.gpu_name})')
 
-        if self.PMD:
+        if self.found_PMD:
             self._violin_plot(axis[2], PMD_avg_window_results, labels)
             axis[2].set_xlabel('Load period (ms)')
             axis[2].set_ylabel('Averaging windod (ms)')
@@ -940,7 +940,7 @@ class GPU_pwr_benchmark:
 
         # PMD data
         PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error , error_msg = None, 0, 0, None, 0, None
-        if self.PMD:
+        if self.found_PMD:
             PMD_data = self._convert_pmd_data(result_dir)
             PMD_data['timestamp'] -= t0
             PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
@@ -970,7 +970,7 @@ class GPU_pwr_benchmark:
                                                 PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg)
         print('.', end='', flush=True)
         if abs(error) > 10:  return avg_window, delay, np.nan, np.nan, np.nan
-        if self.PMD:    return avg_window, delay, PMD_avg_window, PMD_delay, error
+        if self.found_PMD:    return avg_window, delay, PMD_avg_window, PMD_delay, error
         else:           return avg_window, delay
 
     def _reconstr_loss(self, load, power, variables, loss_type='MSE'):
@@ -1043,7 +1043,7 @@ class GPU_pwr_benchmark:
                                 PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
 
         
-        if self.PMD:    n_rows = 4
+        if self.found_PMD:    n_rows = 4
         else:           n_rows = 3
         # Plot the results
         fig, axis = plt.subplots(nrows=n_rows, ncols=1)
@@ -1075,7 +1075,7 @@ class GPU_pwr_benchmark:
         axis[2].set_xlim(axis[0].get_xlim())
         axis[2].legend(loc='lower center')
 
-        if self.PMD:
+        if self.found_PMD:
             # plot a secondary axis for axies[0]
             ax0_2 = axis[0].twinx()
 
@@ -1147,7 +1147,7 @@ class GPU_pwr_benchmark:
         power.set_index('timestamp', inplace=True)
         power.sort_index(inplace=True)
 
-        if self.PMD:
+        if self.found_PMD:
             PMD_data = self._convert_pmd_data(result_dir)
             PMD_data['timestamp'] -= t0
             PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
@@ -1172,7 +1172,7 @@ class GPU_pwr_benchmark:
         axis[1].set_xlim(axis[0].get_xlim())
         axis[1].legend(loc='lower center')
 
-        if self.PMD:
+        if self.found_PMD:
             # plot a secondary axis for axies[0]
             ax0_2 = axis[0].twinx()
 
