@@ -8,5 +8,6 @@
 #SBATCH --partition=defq
 
 source bin/env_setup.sh
+module load GCC/11.3.0
 
 ./source/benchmark.py -b
