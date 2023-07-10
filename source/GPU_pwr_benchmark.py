@@ -24,6 +24,11 @@ class GPU_pwr_benchmark:
         self.sw_meas = sw_meas
         self.PMD = PMD
         self.aliasing_ratios = [1/2, 2/3, 4/5, 6/5, 4/3]
+        self.pwr_draw_options = {
+            'power.draw': False,
+            'power.draw.average': False,
+            'power.draw.instant': False
+        }
         
     def prepare_experiment(self):
         self._get_machine_info()
@@ -36,6 +41,10 @@ class GPU_pwr_benchmark:
         self.log_file = os.path.join(self.result_dir, 'log.txt')
 
         self._print_general_info()
+
+        self.nvsmi_query_options = '--query-gpu=timestamp,utilization.gpu,pstate,temperature.gpu,clocks.current.sm,'
+        for key, value in self.pwr_draw_options.items():
+            if value: self.nvsmi_query_options += key + ','
 
         print('___________________________')
         print('Preparing for experiment...')
@@ -62,24 +71,32 @@ class GPU_pwr_benchmark:
 
     def _print_general_info(self):
         print()
-        time_ =  'Date and time:        ' + time.strftime('%d/%m/%Y %H:%M:%S')
-        gpu =    'Benchmarking on GPU:  ' + self.gpu_name
-        serial = 'GPU serial number:    ' + self.gpu_serial
-        uuid =   'GPU UUID:             ' + self.gpu_uuid
-        driver = 'Driver version:       ' + self.driver_version
-        cuda =   'CUDA version:         ' + self.nvcc_version
-        host =   'Host machine:         ' + os.uname()[1]
+        time_ =            'Date and time:        ' + time.strftime('%d/%m/%Y %H:%M:%S')
+        gpu =              'Benchmarking on GPU:  ' + self.gpu_name
+        serial =           'GPU serial number:    ' + self.gpu_serial
+        uuid =             'GPU UUID:             ' + self.gpu_uuid
+        host =             'Host machine:         ' + os.uname()[1]
+        cuda =             'CUDA version:         ' + self.nvcc_version
+        driver =           'Driver version:       ' + self.driver_version
+        pwr_draw_options = 'Power draw query options: ' 
+        pwr_draw =         '  power.draw:         ' + str(self.pwr_draw_options['power.draw'])
+        pwr_draw_avg =     '  power.draw.average: ' + str(self.pwr_draw_options['power.draw.average'])
+        pwr_draw_inst =    '  power.draw.instant: ' + str(self.pwr_draw_options['power.draw.instant'])
 
-        max_len = max(len(time_), len(gpu), len(host), len(serial), len(uuid), len(driver))
+        max_len = max(len(time_), len(gpu), len(host), len(serial), len(uuid), len(driver), len(cuda), len(pwr_draw_options), len(pwr_draw), len(pwr_draw_avg), len(pwr_draw_inst))
         output = ''
         output += '+ ' + '-'*(max_len) + ' +\n'
         output += '| ' + time_ + ' '*(max_len - len(time_)) + ' |\n'
         output += '| ' + gpu + ' '*(max_len - len(gpu)) + ' |\n'
         output += '| ' + serial + ' '*(max_len - len(serial)) + ' |\n'
         output += '| ' + uuid + ' '*(max_len - len(uuid)) + ' |\n'
-        output += '| ' + driver + ' '*(max_len - len(driver)) + ' |\n'
-        output += '| ' + cuda + ' '*(max_len - len(cuda)) + ' |\n'
         output += '| ' + host + ' '*(max_len - len(host)) + ' |\n'
+        output += '| ' + cuda + ' '*(max_len - len(cuda)) + ' |\n'
+        output += '| ' + driver + ' '*(max_len - len(driver)) + ' |\n'
+        output += '| ' + pwr_draw_options + ' '*(max_len - len(pwr_draw_options)) + ' |\n'
+        output += '| ' + pwr_draw + ' '*(max_len - len(pwr_draw)) + ' |\n'
+        output += '| ' + pwr_draw_avg + ' '*(max_len - len(pwr_draw_avg)) + ' |\n'
+        output += '| ' + pwr_draw_inst + ' '*(max_len - len(pwr_draw_inst)) + ' |\n'
         output += '+ ' + '-'*(max_len) + ' +\n'
         print(output)
         self._log(output)
@@ -95,6 +112,11 @@ class GPU_pwr_benchmark:
         print()
 
     def _get_machine_info(self):
+        def is_number(s):
+            try:    float(s)
+            except ValueError: return False
+            return True
+
         self.epoch_time = time.time()
         result = subprocess.run(['nvidia-smi', '--id=0', '--query-gpu=timestamp,name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
         output = result.stdout.decode().split('\n')[0].split(', ')
@@ -110,6 +132,20 @@ class GPU_pwr_benchmark:
             print("CUDA is not installed or 'nvcc' command not found.")
             self.nvcc_version = 'N/A'
 
+        # Check supported power draw query options
+        output = subprocess.run(['nvidia-smi', '--help-query-gpu'], stdout=subprocess.PIPE)
+        output = output.stdout.decode()
+        query_options = '--query-gpu='
+        for key, value in self.pwr_draw_options.items():
+            if bool(output.find(key)):
+                query_options += key + ','
+
+        output = subprocess.run(['nvidia-smi', query_options, '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
+        output = output.stdout.decode()[:-1].split(', ')
+
+        for i, (key, value) in enumerate(self.pwr_draw_options.items()):
+            self.pwr_draw_options[key] = is_number(output[i])
+
     def _run_benchmark(self, experiment, config, store_path, delay=True):
         '''
         Config for Experiment 1:
@@ -124,7 +160,8 @@ class GPU_pwr_benchmark:
                             str(experiment), 
                             config,
                             store_path, 
-                            str(self.nvsmi_smp_pd), 
+                            str(self.nvsmi_smp_pd),
+                            self.nvsmi_query_options,
                             self.sw_meas, 
                             str(self.PMD)
                         ])
@@ -229,8 +266,10 @@ class GPU_pwr_benchmark:
 
         period_list = []
         last_pwr = df.iloc[0]
+        pwr_option = ' power.draw [W]'
+        if self.pwr_draw_options['power.draw.instant']:    pwr_option = ' power.draw.instant [W]'
         for index, row in df.iterrows():
-            if row[' power.draw [W]'] != last_pwr[' power.draw [W]']:
+            if row[pwr_option] != last_pwr[pwr_option]:
                 period_list.append(row['timestamp'] - last_pwr['timestamp'])
                 last_pwr = row
                 
@@ -259,6 +298,25 @@ class GPU_pwr_benchmark:
 
         print(f'{median_period:.2f} ms')
         self._log(f'{median_period:.2f} ms')
+
+        if self.pwr_draw_options['power.draw.average']:
+            same_rows_percentage = (df[' power.draw [W]'] == df[' power.draw.average [W]']).mean() * 100
+            if same_rows_percentage > 90:
+                print('  power.draw and power.draw.average are the same, treating power.draw as power.draw.average')
+                self._log('  power.draw and power.draw.average are the same, treating power.draw as power.draw.average')
+                self.pwr_draw_options['power.draw'] = False
+        
+        if self.pwr_draw_options['power.draw.instant']:
+            same_rows_percentage = (df[' power.draw [W]'] == df[' power.draw.instant [W]']).mean() * 100
+            if same_rows_percentage > 90:
+                print('  power.draw and power.draw.instant are the same, treating power.draw as power.draw.instant')
+                self._log('  power.draw and power.draw.instant are the same, treating power.draw as power.draw.instant')
+                self.pwr_draw_options['power.draw'] = False
+
+        with open(os.path.join(self.result_dir, 'Preparation', 'pwr_draw_options.txt'), 'w') as f:
+            for key, value in self.pwr_draw_options.items():
+                if value:    f.write(f'{key},')
+
         return median_period
 
     def run_experiment(self, experiment):
@@ -308,8 +366,8 @@ class GPU_pwr_benchmark:
                 os.makedirs(ratio_store_path)
                             
                 for rep in range(self.repetitions):
-                    print(f'  Repetition {rep+1} of {self.repetitions}...')
-                    self._log(f'  Repetition {rep+1} of {self.repetitions}...')
+                    print(f'    Repetition {rep+1} of {self.repetitions}...')
+                    self._log(f'    Repetition {rep+1} of {self.repetitions}...')
 
                     rep_store_path = os.path.join(ratio_store_path, f'rep_#{rep}')
                     os.makedirs(rep_store_path)
@@ -322,7 +380,7 @@ class GPU_pwr_benchmark:
         else:
             raise ValueError(f'Invalid experiment number {experiment}')
 
-    def process_results(self, GPU_name=None, run=0, notes=None):
+    def process_results(self, GPU_name=None, run=0, exp='all'):
         print('_____________________')
         print('Processing results...')
 
@@ -345,9 +403,19 @@ class GPU_pwr_benchmark:
         with open(os.path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'r') as f:  self.jet_lag = int(f.readline())
         print(f'Jet lag: {self.jet_lag} hours')
 
+        with open(os.path.join(self.result_dir, 'Preparation', 'pwr_draw_options.txt'), 'r') as f:
+            options = f.readline().split(',')[:-1]
+            for option in options:
+                self.pwr_draw_options[option] = True
+
         dir_list = os.listdir(self.result_dir)
-        if 'Experiment_1' in dir_list:  self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
-        if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'), notes)
+        continue_ = True
+        if exp == 'all' or exp == 1:    
+            if 'Experiment_1' in dir_list:  continue_ = self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
+        if exp == 'all' or exp == 2:
+            if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'))
+
+        return continue_
 
     def _convert_pmd_data(self, dir):
         with open(os.path.join(dir, 'PMD_start_ts.txt'), 'r') as f:  pmd_start_ts = int(f.readline()) - 50000
@@ -432,6 +500,10 @@ class GPU_pwr_benchmark:
         dir_list = [os.path.join(result_dir, dir, subdir) 
                         for dir in dir_list 
                             for subdir in subdir_list]
+
+        self.PMD = False
+        if os.path.exists(os.path.join(dir_list[0], 'PMD_data.bin')) and os.path.exists(os.path.join(dir_list[0], 'PMD_start_ts.txt')):
+            self.PMD = True
         
         num_processes = min(self.repetitions, os.cpu_count())
         pool = Pool(processes=num_processes)
@@ -439,12 +511,25 @@ class GPU_pwr_benchmark:
         pool.close()
         pool.join()
 
-        print('    Rise time:', statistics.mean(results), 'ms')
+        results = list(map(list, zip(*results)))
 
+        rise_times = []
+        for key, value in self.pwr_draw_options.items():
+            if value:
+                rise_time = results.pop(0)
+                rise_times.append(statistics.mean(rise_time))
+                print(f'    {key} rise time: {statistics.mean(rise_time):.2f} ms')
         
-        # print(self._exp_1_plot_result(dir_list[0]))
+        if self.PMD:
+            for key, value in self.pwr_draw_options.items():
+                if value:
+                    ss_err = results.pop(0)
+                    print(f'    {key} steady state error: {statistics.mean(ss_err):.2f} W')
 
         print('  Done')
+
+        if len(rise_times) == 1 and rise_times[0] > 900:
+            return False
 
     def _exp_1_plot_result(self, dir):
         def plot_PMD_data(dir, t0, t_max, power, axis):
@@ -457,30 +542,35 @@ class GPU_pwr_benchmark:
             axis[1].fill_between(df['timestamp'], df['total_p'], df['eps_total_p'], alpha=0.5, label='Rower draw from PCIE power cables')
             axis[1].fill_between(df['timestamp'], df['eps_total_p'], 0, alpha=0.5, label='Power draw from PCIE slot')
             
-            # iterate through df using iterrows
-            last_timestamp = 0
-            for index, row in power.iterrows():
-                df.loc[(df['timestamp'] > last_timestamp) & (df['timestamp'] <= row['timestamp']), 'nv_power'] = row[' power.draw [W]']
-                last_timestamp = row['timestamp']
+            result = []
+            for key, value in self.pwr_draw_options.items():
+                if value:
+                    last_timestamp = 0
+                    for index, row in power.iterrows():
+                        df.loc[(df['timestamp'] > last_timestamp) & (df['timestamp'] <= row['timestamp']), 'nv_power'] = row[f' {key} [W]']
+                        last_timestamp = row['timestamp']
 
-            df['nv_power_error'] = df['nv_power'] - df['total_p']
-            mse = np.mean(df['nv_power_error']**2)
-            # print('MSE: {}'.format(mse))
+                    df['nv_power_error'] = df['nv_power'] - df['total_p']
+                    # calculate the average of nv_power_error between timestamp 3000 and 6000
+                    result.append(np.mean(df[(df['timestamp'] >= 3000) & (df['timestamp'] <= 6000)]['nv_power_error']))
+                    mse = np.mean(df['nv_power_error']**2)
+                    axis[2].fill_between(df['timestamp'], df['nv_power_error'], 0, alpha=0.5, label=f'{key} error, MSE={mse:.2f}')
             
-            axis[2].fill_between(df['timestamp'], df['nv_power_error'], 0, alpha=1, label=f'Power reading error, MSE={mse:.2f}', color='red')
             axis[2].set_xlabel('Time (ms)')
             axis[2].set_ylabel('Difference [W]')
             axis[2].grid(True, linestyle='--', linewidth=0.5)
             axis[2].set_xlim(axis[0].get_xlim())
             axis[2].legend()
+
+            return result
             # END OF THE FUNCTION
         
-        def find_rise_time(power):
+        def find_rise_time(power, option):
             reduced_power = power[power['timestamp'] < 3000].copy()
-            reduced_power = reduced_power[reduced_power[' power.draw [W]'] != reduced_power[' power.draw [W]'].shift()]
-            reduced_power['pwr_diff'] = reduced_power[' power.draw [W]'].diff()
+            reduced_power = reduced_power[reduced_power[option] != reduced_power[option].shift()]
+            reduced_power['pwr_diff'] = reduced_power[option].diff()
             # remove the power.draw column from the dataframe
-            reduced_power.drop(columns=[' power.draw [W]', ' utilization.gpu [%]', ' pstate', ' temperature.gpu', ' clocks.current.sm [MHz]'], axis=1, inplace=True)
+            reduced_power.drop(columns=[option, ' utilization.gpu [%]', ' pstate', ' temperature.gpu', ' clocks.current.sm [MHz]'], axis=1, inplace=True)
             reduced_power.reset_index(drop=True, inplace=True)
 
             start_ts, end_ts = 0, 0
@@ -518,11 +608,10 @@ class GPU_pwr_benchmark:
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= t_max+10)]
-        rise_time = find_rise_time(power)
 
-        self.PMD = False
-        if os.path.exists(os.path.join(dir, 'PMD_data.bin')) and os.path.exists(os.path.join(dir, 'PMD_start_ts.txt')):
-            self.PMD = True
+        results = []
+        for key, value in self.pwr_draw_options.items():
+            if value:    results.append(find_rise_time(power, f' {key} [W]'))
 
         # plotting
         n_rows = 2
@@ -546,9 +635,11 @@ class GPU_pwr_benchmark:
         axis[0].set_title(f'{self.gpu_name} - {load_percentage}% load')
 
         # check if PMD_data.bin and PMD_start_ts.txt exist
-        if self.PMD:    plot_PMD_data(dir, t0, t_max, power, axis)
+        if self.PMD:    ss_errs = plot_PMD_data(dir, t0, t_max, power, axis)
+        for err in ss_errs:    results.append(err)
 
-        axis[1].plot(power['timestamp'], power[' power.draw [W]'], label='Power draw reported by nvidia-smi', linewidth=2, color='black')
+        for key, value in self.pwr_draw_options.items():
+            if value:    axis[1].plot(power['timestamp'], power[f' {key} [W]'], label=f'{key} [W]', linewidth=2)        
         axis[1].set_xlabel('Time (ms)')
         axis[1].set_ylabel('Power [W]')
         axis[1].grid(True, linestyle='--', linewidth=0.5)
@@ -560,20 +651,30 @@ class GPU_pwr_benchmark:
         plt.savefig(os.path.join(dir, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
 
-        return rise_time
+        return results
 
-    def process_exp_2(self, result_dir, notes):
+    def process_exp_2(self, result_dir):
         print('  Processing experiment 2...')
+
+        if self.pwr_draw_options['power.draw']:    self.exp_2_pwr_option = ' power.draw [W]'
+        else:                                      self.exp_2_pwr_option = ' power.draw.instant [W]'
+
         dir_list = os.listdir(result_dir)
         dir_list = [dir for dir in dir_list if dir.endswith('ms')]
         dir_list = sorted(dir_list, key=lambda dir: int(dir.split('_')[1]))
-        print(f'    Found {len(dir_list)-1} directories to process...')
         
         test_pmd_path = os.path.join(result_dir, dir_list[0], 'rep_#0')
         self.PMD = False
         if os.path.exists(os.path.join(test_pmd_path, 'PMD_data.bin')) and os.path.exists(os.path.join(test_pmd_path, 'PMD_start_ts.txt')):
             print('    Found PMD data')
             self.PMD = True
+            
+
+        plotting_only = dir_list.pop(0)
+        self._exp_2_plotting_only(os.path.join(result_dir, plotting_only))    
+        
+        
+        print(f'    Found {len(dir_list)} directories to process...')
 
         self.pwr_update_freq = int(statistics.median([int(dir.split('_')[1]) for dir in dir_list]))
         #'''
@@ -581,7 +682,6 @@ class GPU_pwr_benchmark:
         args = []
         for dir in dir_list:
             load_pd = int(dir.split('_')[1])
-            if load_pd == self.pwr_update_freq:    continue
 
             ratio_store_path = os.path.join(result_dir, dir)
             labels.append(f'{load_pd}')
@@ -634,10 +734,10 @@ class GPU_pwr_benchmark:
                 for err    in error:              csvwriter.writerow(err)
         
         # '''
-        self._exp_2_plot_results(result_dir, notes)
+        self._exp_2_plot_results(result_dir)
         print('  Done')
 
-    def _exp_2_plot_results(self, result_dir, notes):
+    def _exp_2_plot_results(self, result_dir):
         # read the avg_window_results and delay_results from the csv file
         with open(os.path.join(result_dir, 'results.csv'), 'r', newline='') as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=',')
@@ -746,7 +846,7 @@ class GPU_pwr_benchmark:
         # axis[1].text(0.65,  -0.25, f'Std delay:    {delay_std:.2f} ms', transform=axis[1].transAxes, ha='left', va='center', fontdict={'fontfamily': 'monospace'})
 
         fig.set_size_inches(12, 5*n_rows)
-        fname = f'history_length_{self.gpu_name}{notes}'
+        fname = f'history_length_{self.gpu_name}'
         plt.savefig(os.path.join(result_dir, fname+'.jpg'), format='jpg', dpi=256, bbox_inches='tight')
         plt.savefig(os.path.join(result_dir, fname+'.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
@@ -824,7 +924,7 @@ class GPU_pwr_benchmark:
         power.sort_index(inplace=True)
 
         # Optimization
-        reduced_power = power[power[' power.draw [W]'] != power[' power.draw [W]'].shift()].copy()
+        reduced_power = power[power[self.exp_2_pwr_option] != power[self.exp_2_pwr_option].shift()].copy()
         reduced_power.drop(columns=[' utilization.gpu [%]', ' pstate', ' temperature.gpu', ' clocks.current.sm [MHz]'], axis=1, inplace=True)
         loss_func = partial(self._reconstr_loss, load, reduced_power)
 
@@ -855,7 +955,7 @@ class GPU_pwr_benchmark:
             PMD_reconstructed = self._reconstruction(PMD_cp, reduced_power, PMD_avg_window, PMD_delay)
 
             # compare what you get in energy when integrating the power signal
-            nv_energy = np.trapz(power[' power.draw [W]'], power.index) / 1000
+            nv_energy = np.trapz(power[self.exp_2_pwr_option], power.index) / 1000
             pmd_energy = np.trapz(PMD_cp['activity'], PMD_cp.index) / 1000
             error = (nv_energy - pmd_energy) / pmd_energy * 100
             error_msg = f'nv_energy: {nv_energy:.2f} J, pmd_energy: {pmd_energy:.2f} J, diff: {nv_energy - pmd_energy:.2f} J, error: {error:.2f}%'
@@ -880,15 +980,15 @@ class GPU_pwr_benchmark:
         reconstructed = reconstructed.iloc[int(len(reconstructed)*0.2):int(len(reconstructed)*0.9)]
 
         # norm the 2 signals before calculating the loss
-        power_norm = (power[' power.draw [W]'] - power[' power.draw [W]'].mean()) / power[' power.draw [W]'].std()
-        reconstructed_norm = (reconstructed[' power.draw [W]'] - reconstructed[' power.draw [W]'].mean()) / reconstructed[' power.draw [W]'].std()
+        power_norm = (power[self.exp_2_pwr_option] - power[self.exp_2_pwr_option].mean()) / power[self.exp_2_pwr_option].std()
+        reconstructed_norm = (reconstructed[self.exp_2_pwr_option] - reconstructed[self.exp_2_pwr_option].mean()) / reconstructed[self.exp_2_pwr_option].std()
 
         if loss_type == 'MSE':
             return np.mean((power_norm - reconstructed_norm)**2)
         elif loss_type == 'MAE':
-            return np.mean(np.abs(power[' power.draw [W]'] - reconstructed[' power.draw [W]']))
+            return np.mean(np.abs(power[self.exp_2_pwr_option] - reconstructed[self.exp_2_pwr_option]))
         elif loss_type == 'EMSE':
-            return np.sqrt(np.mean((power[' power.draw [W]'] - reconstructed[' power.draw [W]'])**2))
+            return np.sqrt(np.mean((power[self.exp_2_pwr_option] - reconstructed[self.exp_2_pwr_option])**2))
         else:
             raise Exception('Invalid loss type')    
 
@@ -900,8 +1000,8 @@ class GPU_pwr_benchmark:
                 # find the first row in load that is after the current timestamp
                 after = load[load.index >= idx].iloc[0]
                 before = load[load.index <= idx]
-                if before.empty:    reconstructed.loc[idx, ' power.draw [W]'] = after['activity']
-                else:               reconstructed.loc[idx, ' power.draw [W]'] = (after['activity'] + before.iloc[-1]['activity']) / 2
+                if before.empty:    reconstructed.loc[idx, self.exp_2_pwr_option] = after['activity']
+                else:               reconstructed.loc[idx, self.exp_2_pwr_option] = (after['activity'] + before.iloc[-1]['activity']) / 2
                 
             else:
                 # find rows in load df that are within the past history_length of the current timestamp
@@ -932,7 +1032,7 @@ class GPU_pwr_benchmark:
                 p = np.concatenate((np.array([lb_p]), load_window['activity'].to_numpy(), np.array([ub_p])))
                 reconstr_pwr = np.trapz(p, t) / history_length
                 
-                reconstructed.loc[idx, ' power.draw [W]'] = reconstr_pwr
+                reconstructed.loc[idx, self.exp_2_pwr_option] = reconstr_pwr
 
         return reconstructed
 
@@ -954,7 +1054,7 @@ class GPU_pwr_benchmark:
         axis[0].legend(loc='upper right')
         axis[0].set_title(f'{self.gpu_name} - {load_period} ms load window')
         
-        axis[1].plot(power.index, power[' power.draw [W]'], label='Power draw')
+        axis[1].plot(power.index, power[self.exp_2_pwr_option], label='Power draw')
         axis[1].set_xlabel('Time (ms)')
         axis[1].set_ylabel('Power [W]')
         axis[1].grid(True, linestyle='--', linewidth=0.5)
@@ -962,10 +1062,10 @@ class GPU_pwr_benchmark:
         axis[1].legend(loc='lower center')
 
         reconstructed = reconstructed.loc[reconstructed.index.repeat(2)]
-        reconstructed[' power.draw [W]'] = reconstructed[' power.draw [W]'].shift()
+        reconstructed[self.exp_2_pwr_option] = reconstructed[self.exp_2_pwr_option].shift()
         reconstructed = reconstructed.dropna()
 
-        axis[2].plot(reconstructed.index, reconstructed[' power.draw [W]'], label='Reconstructed power draw')
+        axis[2].plot(reconstructed.index, reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw')
         axis[2].set_xlabel('Time (ms)')
         axis[2].set_ylabel('Power [W]')
         axis[2].grid(True, linestyle='--', linewidth=0.5)
@@ -985,10 +1085,10 @@ class GPU_pwr_benchmark:
             
 
             PMD_reconstructed = PMD_reconstructed.loc[PMD_reconstructed.index.repeat(2)]
-            PMD_reconstructed[' power.draw [W]'] = PMD_reconstructed[' power.draw [W]'].shift()
+            PMD_reconstructed[self.exp_2_pwr_option] = PMD_reconstructed[self.exp_2_pwr_option].shift()
             PMD_reconstructed = PMD_reconstructed.dropna()
 
-            axis[3].plot(PMD_reconstructed.index, PMD_reconstructed[' power.draw [W]'], label='Reconstructed power draw from PMD data')
+            axis[3].plot(PMD_reconstructed.index, PMD_reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw from PMD data')
             axis[3].set_xlabel('Time (ms)')
             axis[3].set_ylabel('Power [W]')
             axis[3].grid(True, linestyle='--', linewidth=0.5)
@@ -1007,3 +1107,88 @@ class GPU_pwr_benchmark:
         plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
         plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
+
+    def _exp_2_plotting_only(self, dir):
+        dirs = []
+        for rep in range(self.repetitions):
+            rep_store_path = os.path.join(dir, f'rep_#{rep}')
+            dirs.append(rep_store_path)
+
+        num_processes = min(len(dirs), os.cpu_count())
+        pool = Pool(processes=num_processes)
+        pool.map(self._exp_2_plot_power_data, dirs)
+        pool.close()
+        pool.join()
+
+
+    def _exp_2_plot_power_data(self, result_dir):
+        # Load data
+        load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
+        load.loc[-1] = load.loc[0] - 500000
+        load.index = load.index + 1
+        load = load.sort_index()
+        load['activity'] = (load.index / 2).astype(int) % 2
+        load['timestamp'] = (load['timestamp'] / 1000).astype(int) 
+        t0 = load['timestamp'][0]
+        load['timestamp'] -= t0
+        load.loc[load.index[-1], 'timestamp'] += 500
+        load.loc[load.index[-1], 'activity'] = 0
+        load.set_index('timestamp', inplace=True)
+        load.sort_index(inplace=True)
+
+        # nv_smi power data
+        power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
+        power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+        power['timestamp'] += 60*60*1000 * self.jet_lag
+        power['timestamp'] -= t0
+        power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load.index[-1])]
+        power.set_index('timestamp', inplace=True)
+        power.sort_index(inplace=True)
+
+        if self.PMD:
+            PMD_data = self._convert_pmd_data(result_dir)
+            PMD_data['timestamp'] -= t0
+            PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
+            PMD_data.set_index('timestamp', inplace=True)
+            PMD_data.sort_index(inplace=True)
+
+        fig, axis = plt.subplots(nrows=2, ncols=1)
+
+        axis[0].plot(load.index, load['activity']*100, label='load')
+        axis[0].plot(power.index, power[' utilization.gpu [%]'], label='utilization.gpu [%]')
+        axis[0].set_xlabel('Time (ms)')
+        axis[0].set_ylabel('Load')
+        axis[0].grid(True, linestyle='--', linewidth=0.5)
+        axis[0].set_xlim(0, load.index.max())
+        axis[0].legend(loc='upper right')
+        axis[0].set_title(f'{self.gpu_name} - load window as half of power update period')
+        
+        axis[1].plot(power.index, power[self.exp_2_pwr_option], label='Power draw')
+        axis[1].set_xlabel('Time (ms)')
+        axis[1].set_ylabel('Power [W]')
+        axis[1].grid(True, linestyle='--', linewidth=0.5)
+        axis[1].set_xlim(axis[0].get_xlim())
+        axis[1].legend(loc='lower center')
+
+        if self.PMD:
+            # plot a secondary axis for axies[0]
+            ax0_2 = axis[0].twinx()
+
+            ax0_2.fill_between(PMD_data.index, PMD_data['total_p'], PMD_data['eps_total_p'], alpha=0.5, label='Rower draw from PCIE power cables')
+            ax0_2.fill_between(PMD_data.index, PMD_data['eps_total_p'], 0, alpha=0.5, label='Power draw from PCIE slot')
+            ax0_2.set_xlabel('Time (ms)')
+            ax0_2.set_ylabel('Power [W]')
+            ax0_2.set_xlim(axis[0].get_xlim())
+            ax0_2.legend(loc='lower right')
+
+        fig.set_size_inches(20, 10)
+        plt.savefig(os.path.join(result_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(result_dir, 'result.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
+
+
+
+
+
+
+

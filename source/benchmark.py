@@ -37,8 +37,12 @@ def experiment(args):
         else:
             experiments = [1, 2]
 
-        for experiment in experiments:  benchmark.run_experiment(experiment)
-        if args.plot:  benchmark.process_results()
+        for experiment in experiments:  
+            benchmark.run_experiment(experiment)
+            if args.plot:  
+                if not benchmark.process_results(exp=experiment):
+                    print("Risetime is too long, no need to perform further experiments")
+                    break
 
     elif args.plot:
         if args.gpu is None:
