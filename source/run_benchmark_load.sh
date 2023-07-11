@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # throw a error if the number of input arguments is not 7
-if [ $# -ne 7 ]; then
+if [ $# -ne 8 ]; then
     echo "Error: invalid number of arguments"
     echo "Usage: $0 <experiment> <config> <result dir> <sampling pd>"
     echo "  experiment:              the experiment to run"
@@ -11,6 +11,7 @@ if [ $# -ne 7 ]; then
     echo "  nv-smi query options:    the nvidia-smi query options"
     echo "  Software measurement:    nvidia-smi, NVML, or None"
     echo "  PMD:                     if measuring power using PMD"
+    echo "  GPU_ID:                  ID of the GPU to run the experiment on"
 
     exit 1
 fi
@@ -23,6 +24,7 @@ sampling_pd=$4
 nvsmi_query_options=$5
 software_measurement=$6
 pmd=$7
+gpu_id=$8
 
 gpudata_dir=$result_dir/gpudata.csv
 
@@ -35,7 +37,7 @@ gpudata_dir=$result_dir/gpudata.csv
 if [ $software_measurement == "nvidia-smi" ]; then
     # Run the nvidia-smi command in the background
     # echo "Running nvidia-smi measurement in the background..."
-    nvidia-smi --id=0 $nvsmi_query_options --format=csv,nounits -f $gpudata_dir -lms $sampling_pd &
+    nvidia-smi --id=$gpu_id $nvsmi_query_options --format=csv,nounits -f $gpudata_dir -lms $sampling_pd &
     nvidia_pid=$!
 
     # check if nvdia-smi started successfully
@@ -52,7 +54,7 @@ else
 fi
 
 # echo "Running the GPU benchmark..."
-/tmp/benchmark_load $experiment $config $result_dir $NVML $pmd
+/tmp/benchmark_load $experiment $config $result_dir $NVML $pmd $gpu_id
 
 if [ $software_measurement == "nvidia-smi" ]; then
     # Kill the nvidia-smi process

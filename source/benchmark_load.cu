@@ -57,9 +57,12 @@ int main(int argc, const char **argv) {
     std::string result_dir = argv[3];
     bool NVML = std::stoi(argv[4]);
     bool PMD = std::stoi(argv[5]);
+    int gpu_id = std::stoi(argv[6]);
     
     std::stringstream ss(config);  std::string token;
     
+    cudaSetDevice(gpu_id);
+
     // initialize GPU and get device properties
     int dev = findCudaDevice(argc, (const char **) argv);
     if (dev == -1) return EXIT_FAILURE;

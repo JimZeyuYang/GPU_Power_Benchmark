@@ -15,6 +15,7 @@ def main():
     parser.add_argument('-g', '--gpu', help='GPU model data to process')
     parser.add_argument('-m', '--sw_meas', choices=['nvidia-smi', 'NVML', 'none'], default='nvidia-smi', help='Software to use for GPU power measurement')
     parser.add_argument('-v', '--verbose', action='store_true', help='Prints out the results of the benchmark')
+    parser.add_argument('-i', '--gpu_id', type=int, default=0, help='GPU ID to use for the benchmark')
 
     args = parser.parse_args()
     experiment(args)
@@ -27,7 +28,7 @@ def experiment(args):
     if os.uname()[1] == 'jim-linux': PMD = 1
     else:                            PMD = 0
 
-    benchmark = GPU_pwr_benchmark(args.sw_meas, PMD, verbose=args.verbose)
+    benchmark = GPU_pwr_benchmark(args.sw_meas, gpu_id=args.gpu_id, PMD=PMD, verbose=args.verbose)
 
     if args.benchmark:
         benchmark.prepare_experiment()

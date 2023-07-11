@@ -15,13 +15,14 @@ from scipy.optimize import minimize
 import csv
 
 class GPU_pwr_benchmark:
-    def __init__(self, sw_meas, PMD=0, verbose=False):
+    def __init__(self, sw_meas, gpu_id=0, PMD=0, verbose=False):
         print('_________________________')
         print('Initializing benchmark...')
         self.verbose = verbose
         self.repetitions = 32
         self.nvsmi_smp_pd = 5
         self.sw_meas = sw_meas
+        self.gpu_id = gpu_id
         self.PMD = PMD
         self.aliasing_ratios = [1/2, 2/3, 4/5, 6/5, 4/3]
         self.pwr_draw_options = {
@@ -118,7 +119,7 @@ class GPU_pwr_benchmark:
             return True
 
         self.epoch_time = time.time()
-        result = subprocess.run(['nvidia-smi', '--id=0', '--query-gpu=timestamp,name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
+        result = subprocess.run(['nvidia-smi', f'--id={self.gpu_id}', '--query-gpu=timestamp,name,serial,uuid,driver_version', '--format=csv,noheader'], stdout=subprocess.PIPE)
         output = result.stdout.decode().split('\n')[0].split(', ')
         self.nvsmi_time, self.gpu_name, self.gpu_serial, self.gpu_uuid, self.driver_version = output
         self.gpu_name = self.gpu_name.replace(' ', '_')
@@ -141,7 +142,7 @@ class GPU_pwr_benchmark:
                 query_options += key + ','
                 self.pwr_draw_options[key] = True
 
-        output = subprocess.run(['nvidia-smi', '--id=0', query_options, '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
+        output = subprocess.run(['nvidia-smi', f'--id={self.gpu_id}', query_options, '--format=csv,noheader,nounits'], stdout=subprocess.PIPE)
         output = output.stdout.decode()[:-1].split(', ')
 
         for i, (key, value) in enumerate(self.pwr_draw_options.items()):
@@ -163,8 +164,9 @@ class GPU_pwr_benchmark:
                             store_path, 
                             str(self.nvsmi_smp_pd),
                             self.nvsmi_query_options,
-                            self.sw_meas, 
-                            str(self.PMD)
+                            self.sw_meas,
+                            str(self.PMD), 
+                            str(self.gpu_id)
                         ])
         if delay:  time.sleep(1)
 
@@ -273,7 +275,7 @@ class GPU_pwr_benchmark:
             if row[pwr_option] != last_pwr[pwr_option]:
                 period_list.append(row['timestamp'] - last_pwr['timestamp'])
                 last_pwr = row
-                
+        
         avg_period = statistics.mean(period_list)
         median_period = statistics.median(period_list)
         std_period = statistics.stdev(period_list)
