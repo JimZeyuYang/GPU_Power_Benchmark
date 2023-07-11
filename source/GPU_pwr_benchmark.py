@@ -571,7 +571,7 @@ class GPU_pwr_benchmark:
             # END OF THE FUNCTION
         
         def find_rise_time(power, option):
-            reduced_power = power[power['timestamp'] < 3000].copy()
+            reduced_power = power[(power['timestamp'] < 3000) & ((power['timestamp'] > 450))].copy()
             reduced_power = reduced_power[reduced_power[option] != reduced_power[option].shift()]
             reduced_power['pwr_diff'] = reduced_power[option].diff()
             # remove the power.draw column from the dataframe
