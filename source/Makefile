@@ -1,7 +1,7 @@
 INC	:= -I$(CUDA_HOME)/include -I.
 LIB	:= -L$(CUDA_HOME)/lib64 -lcudart -lcublas
 
-NVCCFLAGS	:= -lineinfo --ptxas-options=-v --use_fast_math
+NVCCFLAGS	:= -lineinfo --ptxas-options=-v --use_fast_math $(ARCH)
 
 BINDIR	:= /tmp
 OBJS := PMD.o

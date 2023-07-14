@@ -24,7 +24,7 @@ class GPU_pwr_benchmark:
         self.sw_meas = sw_meas
         self.gpu_id = gpu_id
         self.PMD = PMD
-        self.aliasing_ratios = [1/2, 2/3, 4/5, 6/5, 4/3]
+        self.aliasing_ratios = [1/2, 2/3, 3/4, 4/5, 6/5, 5/4, 4/3]
         self.pwr_draw_options = {
             'power.draw': False,
             'power.draw.average': False,
@@ -106,8 +106,7 @@ class GPU_pwr_benchmark:
         print('Recompiling benchmark load...')
         # make clean and make
         # try can catch the error
-        subprocess.call(['make', '-C', 'source/', 'clean'])
-        return_code = subprocess.call(['make', '-C', 'source/'])
+        return_code = subprocess.call(['./source/compile.sh'])
         if return_code != 0:  raise Exception('Error compiling benchmark')
 
         print()
