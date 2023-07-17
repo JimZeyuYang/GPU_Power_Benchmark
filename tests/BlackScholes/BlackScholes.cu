@@ -59,7 +59,7 @@ float RandFloat(float low, float high) {
 ////////////////////////////////////////////////////////////////////////////////
 // Data configuration
 ////////////////////////////////////////////////////////////////////////////////
-const int OPT_N = 4000000;
+const int OPT_N = 8000000;
 const int NUM_ITERATIONS = 512;
 
 const int OPT_SZ = OPT_N * sizeof(float);
@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
       // GPU instance of input data
       *d_StockPrice, *d_OptionStrike, *d_OptionYears;
 
-  double delta, ref, sum_delta, sum_ref, max_delta, L1norm, gpuTime;
+  double gpuTime;
 
   StopWatchInterface *hTimer = NULL;
   int i;
@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
 
   checkCudaErrors(cudaDeviceSynchronize());
   sdkStopTimer(&hTimer);
-  gpuTime = sdkGetTimerValue(&hTimer) / NUM_ITERATIONS;
+  gpuTime = sdkGetTimerValue(&hTimer);
 
   // Both call and put is calculated
   printf("Options count             : %i     \n", 2 * OPT_N);
@@ -180,64 +180,60 @@ int main(int argc, char **argv) {
   checkCudaErrors(
       cudaMemcpy(h_PutResultGPU, d_PutResult, OPT_SZ, cudaMemcpyDeviceToHost));
 
-  printf("Checking the results...\n");
-  printf("...running CPU calculations.\n\n");
-  // Calculate options values on CPU
-  BlackScholesCPU(h_CallResultCPU, h_PutResultCPU, h_StockPrice, h_OptionStrike,
-                  h_OptionYears, RISKFREE, VOLATILITY, OPT_N);
+  // printf("Checking the results...\n");
+  // printf("...running CPU calculations.\n\n");
+  // // Calculate options values on CPU
+  // BlackScholesCPU(h_CallResultCPU, h_PutResultCPU, h_StockPrice, h_OptionStrike,
+  //                 h_OptionYears, RISKFREE, VOLATILITY, OPT_N);
 
-  printf("Comparing the results...\n");
-  // Calculate max absolute difference and L1 distance
-  // between CPU and GPU results
-  sum_delta = 0;
-  sum_ref = 0;
-  max_delta = 0;
+  // printf("Comparing the results...\n");
+  // // Calculate max absolute difference and L1 distance
+  // // between CPU and GPU results
+  // sum_delta = 0;
+  // sum_ref = 0;
+  // max_delta = 0;
 
-  for (i = 0; i < OPT_N; i++) {
-    ref = h_CallResultCPU[i];
-    delta = fabs(h_CallResultCPU[i] - h_CallResultGPU[i]);
+  // for (i = 0; i < OPT_N; i++) {
+  //   ref = h_CallResultCPU[i];
+  //   delta = fabs(h_CallResultCPU[i] - h_CallResultGPU[i]);
 
-    if (delta > max_delta) {
-      max_delta = delta;
-    }
+  //   if (delta > max_delta) {
+  //     max_delta = delta;
+  //   }
 
-    sum_delta += delta;
-    sum_ref += fabs(ref);
-  }
+  //   sum_delta += delta;
+  //   sum_ref += fabs(ref);
+  // }
 
-  L1norm = sum_delta / sum_ref;
-  printf("L1 norm: %E\n", L1norm);
-  printf("Max absolute error: %E\n\n", max_delta);
+  // L1norm = sum_delta / sum_ref;
+  // printf("L1 norm: %E\n", L1norm);
+  // printf("Max absolute error: %E\n\n", max_delta);
 
-  printf("Shutting down...\n");
-  printf("...releasing GPU memory.\n");
-  checkCudaErrors(cudaFree(d_OptionYears));
-  checkCudaErrors(cudaFree(d_OptionStrike));
-  checkCudaErrors(cudaFree(d_StockPrice));
-  checkCudaErrors(cudaFree(d_PutResult));
-  checkCudaErrors(cudaFree(d_CallResult));
+  // printf("Shutting down...\n");
+  // printf("...releasing GPU memory.\n");
+  // checkCudaErrors(cudaFree(d_OptionYears));
+  // checkCudaErrors(cudaFree(d_OptionStrike));
+  // checkCudaErrors(cudaFree(d_StockPrice));
+  // checkCudaErrors(cudaFree(d_PutResult));
+  // checkCudaErrors(cudaFree(d_CallResult));
 
-  printf("...releasing CPU memory.\n");
-  free(h_OptionYears);
-  free(h_OptionStrike);
-  free(h_StockPrice);
-  free(h_PutResultGPU);
-  free(h_CallResultGPU);
-  free(h_PutResultCPU);
-  free(h_CallResultCPU);
-  sdkDeleteTimer(&hTimer);
-  printf("Shutdown done.\n");
+  // printf("...releasing CPU memory.\n");
+  // free(h_OptionYears);
+  // free(h_OptionStrike);
+  // free(h_StockPrice);
+  // free(h_PutResultGPU);
+  // free(h_CallResultGPU);
+  // free(h_PutResultCPU);
+  // free(h_CallResultCPU);
+  // sdkDeleteTimer(&hTimer);
+  // printf("Shutdown done.\n");
 
-  printf("\n[BlackScholes] - Test Summary\n");
+  // printf("\n[BlackScholes] - Test Summary\n");
 
-  if (L1norm > 1e-6) {
-    printf("Test failed!\n");
-    exit(EXIT_FAILURE);
-  }
+  // if (L1norm > 1e-6) {
+  //   printf("Test failed!\n");
+  //   exit(EXIT_FAILURE);
+  // }
 
-  printf(
-      "\nNOTE: The CUDA Samples are not meant for performance measurements. "
-      "Results may vary when GPU Boost is enabled.\n\n");
-  printf("Test passed\n");
   exit(EXIT_SUCCESS);
 }

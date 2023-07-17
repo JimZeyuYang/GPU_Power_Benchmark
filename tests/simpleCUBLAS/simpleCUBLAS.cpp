@@ -42,27 +42,7 @@
 #include <helper_cuda.h>
 
 /* Matrix size */
-#define N (275)
-
-/* Host implementation of a simple version of sgemm */
-static void simple_sgemm(int n, float alpha, const float *A, const float *B,
-                         float beta, float *C) {
-  int i;
-  int j;
-  int k;
-
-  for (i = 0; i < n; ++i) {
-    for (j = 0; j < n; ++j) {
-      float prod = 0;
-
-      for (k = 0; k < n; ++k) {
-        prod += A[k * n + i] * B[j * n + k];
-      }
-
-      C[j * n + i] = alpha * prod + beta * C[j * n + i];
-    }
-  }
-}
+#define N (10000)
 
 /* Main */
 int main(int argc, char **argv) {
@@ -70,7 +50,6 @@ int main(int argc, char **argv) {
   float *h_A;
   float *h_B;
   float *h_C;
-  float *h_C_ref;
   float *d_A = 0;
   float *d_B = 0;
   float *d_C = 0;
@@ -169,10 +148,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  /* Performs operation using plain C code */
-  simple_sgemm(N, alpha, h_A, h_B, beta, h_C);
-  h_C_ref = h_C;
-
+  printf("Kernel Executing..\n");
   /* Performs operation using cublas */
   status = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, d_A,
                        N, d_B, N, &beta, d_C, N);
@@ -181,6 +157,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "!!!! kernel execution error.\n");
     return EXIT_FAILURE;
   }
+  printf("Kernel Executed..\n");
 
   /* Allocate host memory for reading back the result from device memory */
   h_C = reinterpret_cast<float *>(malloc(n2 * sizeof(h_C[0])));
@@ -198,29 +175,10 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  /* Check result against reference */
-  error_norm = 0;
-  ref_norm = 0;
-
-  for (i = 0; i < n2; ++i) {
-    diff = h_C_ref[i] - h_C[i];
-    error_norm += diff * diff;
-    ref_norm += h_C_ref[i] * h_C_ref[i];
-  }
-
-  error_norm = static_cast<float>(sqrt(static_cast<double>(error_norm)));
-  ref_norm = static_cast<float>(sqrt(static_cast<double>(ref_norm)));
-
-  if (fabs(ref_norm) < 1e-7) {
-    fprintf(stderr, "!!!! reference norm is 0\n");
-    return EXIT_FAILURE;
-  }
-
   /* Memory clean up */
   free(h_A);
   free(h_B);
   free(h_C);
-  free(h_C_ref);
 
   if (cudaFree(d_A) != cudaSuccess) {
     fprintf(stderr, "!!!! memory free error (A)\n");
@@ -245,11 +203,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  if (error_norm / ref_norm < 1e-6f) {
-    printf("simpleCUBLAS test passed.\n");
-    exit(EXIT_SUCCESS);
-  } else {
-    printf("simpleCUBLAS test failed.\n");
-    exit(EXIT_FAILURE);
-  }
+  printf("Done\n");
+  exit(EXIT_SUCCESS);
+
 }

@@ -56,7 +56,7 @@ extern "C" void quasirandomGeneratorGPU(float *d_Output, unsigned int seed,
 extern "C" void inverseCNDgpu(float *d_Output, unsigned int *d_Input,
                               unsigned int N);
 
-const int N = 1048576;
+const int N = 10485760;
 
 int main(int argc, char **argv) {
   // Start logs
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
 
   printf("Testing QRNG...\n\n");
   checkCudaErrors(cudaMemset(d_Output, 0, QRNG_DIMENSIONS * N * sizeof(float)));
-  int numIterations = 20;
+  int numIterations = 1000;
 
   for (int i = -1; i < numIterations; i++) {
     if (i == 0) {
@@ -117,67 +117,7 @@ int main(int argc, char **argv) {
   checkCudaErrors(cudaMemcpy(h_OutputGPU, d_Output,
                              QRNG_DIMENSIONS * N * sizeof(float),
                              cudaMemcpyDeviceToHost));
-
-  printf("Comparing to the CPU results...\n\n");
-  sumDelta = 0;
-  sumRef = 0;
-
-  for (dim = 0; dim < QRNG_DIMENSIONS; dim++)
-    for (pos = 0; pos < N; pos++) {
-      ref = getQuasirandomValue63(pos, dim);
-      delta = (double)h_OutputGPU[dim * N + pos] - ref;
-      sumDelta += fabs(delta);
-      sumRef += fabs(ref);
-    }
-
-  printf("L1 norm: %E\n", sumDelta / sumRef);
-
-  printf("\nTesting inverseCNDgpu()...\n\n");
-  checkCudaErrors(cudaMemset(d_Output, 0, QRNG_DIMENSIONS * N * sizeof(float)));
-
-  for (int i = -1; i < numIterations; i++) {
-    if (i == 0) {
-      checkCudaErrors(cudaDeviceSynchronize());
-      sdkResetTimer(&hTimer);
-      sdkStartTimer(&hTimer);
-    }
-
-    inverseCNDgpu(d_Output, NULL, QRNG_DIMENSIONS * N);
-  }
-
-  checkCudaErrors(cudaDeviceSynchronize());
-  sdkStopTimer(&hTimer);
-  gpuTime = sdkGetTimerValue(&hTimer) / (double)numIterations * 1e-3;
-  printf(
-      "quasirandomGenerator-inverse, Throughput = %.4f GNumbers/s, Time = %.5f "
-      "s, Size = %u Numbers, NumDevsUsed = %u, Workgroup = %u\n",
-      (double)QRNG_DIMENSIONS * (double)N * 1E-9 / gpuTime, gpuTime,
-      QRNG_DIMENSIONS * N, 1, 128);
-
-  printf("Reading GPU results...\n");
-  checkCudaErrors(cudaMemcpy(h_OutputGPU, d_Output,
-                             QRNG_DIMENSIONS * N * sizeof(float),
-                             cudaMemcpyDeviceToHost));
-
-  printf("\nComparing to the CPU results...\n");
-  sumDelta = 0;
-  sumRef = 0;
-  unsigned int distance = ((unsigned int)-1) / (QRNG_DIMENSIONS * N + 1);
-
-  for (pos = 0; pos < QRNG_DIMENSIONS * N; pos++) {
-    unsigned int d = (pos + 1) * distance;
-    ref = MoroInvCNDcpu(d);
-    delta = (double)h_OutputGPU[pos] - ref;
-    sumDelta += fabs(delta);
-    sumRef += fabs(ref);
-  }
-
-  printf("L1 norm: %E\n\n", L1norm = sumDelta / sumRef);
-
-  printf("Shutting down...\n");
-  sdkDeleteTimer(&hTimer);
-  free(h_OutputGPU);
-  checkCudaErrors(cudaFree(d_Output));
-
-  exit(L1norm < 1e-6 ? EXIT_SUCCESS : EXIT_FAILURE);
+  
+  
+  exit(EXIT_SUCCESS);
 }

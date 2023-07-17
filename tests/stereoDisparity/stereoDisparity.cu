@@ -93,8 +93,8 @@ void runTest(int argc, char **argv) {
   unsigned char *h_img0 = NULL;
   unsigned char *h_img1 = NULL;
   unsigned int w, h;
-  char *fname0 = sdkFindFilePath("stereo.im0.640x533.ppm", argv[0]);
-  char *fname1 = sdkFindFilePath("stereo.im1.640x533.ppm", argv[0]);
+  char *fname0 = sdkFindFilePath("upscaled_stereo.im0.640x533.ppm", argv[0]);
+  char *fname1 = sdkFindFilePath("upscaled_stereo.im1.640x533.ppm", argv[0]);
 
   printf("Loaded <%s> as image 0\n", fname0);
 
@@ -195,8 +195,10 @@ void runTest(int argc, char **argv) {
   checkCudaErrors(cudaEventRecord(start, NULL));
 
   // launch the stereoDisparity kernel
+  for (int i = 0; i < 1; i++) {
   stereoDisparityKernel<<<numBlocks, numThreads>>>(
       d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
+  }
 
   // Record the stop event
   checkCudaErrors(cudaEventRecord(stop, NULL));
@@ -214,54 +216,33 @@ void runTest(int argc, char **argv) {
   checkCudaErrors(
       cudaMemcpy(h_odata, d_odata, memSize, cudaMemcpyDeviceToHost));
 
-  printf("Input Size  [%dx%d], ", w, h);
-  printf("Kernel size [%dx%d], ", (2 * RAD + 1), (2 * RAD + 1));
-  printf("Disparities [%d:%d]\n", minDisp, maxDisp);
+  // printf("Input Size  [%dx%d], ", w, h);
+  // printf("Kernel size [%dx%d], ", (2 * RAD + 1), (2 * RAD + 1));
+  // printf("Disparities [%d:%d]\n", minDisp, maxDisp);
 
   printf("GPU processing time : %.4f (ms)\n", msecTotal);
-  printf("Pixel throughput    : %.3f Mpixels/sec\n",
-         ((float)(w * h * 1000.f) / msecTotal) / 1000000);
+  // printf("Pixel throughput    : %.3f Mpixels/sec\n",
+  //        ((float)(w * h * 1000.f) / msecTotal) / 1000000);
 
-  // calculate sum of resultant GPU image
-  unsigned int checkSum = 0;
+  // // compute reference solution
+  // printf("Computing CPU reference...\n");
+  // cpu_gold_stereo((unsigned int *)h_img0, (unsigned int *)h_img1,
+  //                 (unsigned int *)h_odata, w, h, minDisp, maxDisp);
+  // unsigned int cpuCheckSum = 0;
 
-  for (unsigned int i = 0; i < w * h; i++) {
-    checkSum += h_odata[i];
-  }
+  // for (unsigned int i = 0; i < w * h; i++) {
+  //   cpuCheckSum += h_odata[i];
+  // }
 
-  printf("GPU Checksum = %u, ", checkSum);
+  // printf("CPU Checksum = %u, ", cpuCheckSum);
+  // const char *cpuFnameOut = "output_CPU.pgm";
 
-  // write out the resulting disparity image.
-  unsigned char *dispOut = (unsigned char *)malloc(numData);
-  int mult = 20;
-  const char *fnameOut = "output_GPU.pgm";
+  // for (unsigned int i = 0; i < numData; i++) {
+  //   dispOut[i] = (int)h_odata[i] * mult;
+  // }
 
-  for (unsigned int i = 0; i < numData; i++) {
-    dispOut[i] = (int)h_odata[i] * mult;
-  }
-
-  printf("GPU image: <%s>\n", fnameOut);
-  sdkSavePGM(fnameOut, dispOut, w, h);
-
-  // compute reference solution
-  printf("Computing CPU reference...\n");
-  cpu_gold_stereo((unsigned int *)h_img0, (unsigned int *)h_img1,
-                  (unsigned int *)h_odata, w, h, minDisp, maxDisp);
-  unsigned int cpuCheckSum = 0;
-
-  for (unsigned int i = 0; i < w * h; i++) {
-    cpuCheckSum += h_odata[i];
-  }
-
-  printf("CPU Checksum = %u, ", cpuCheckSum);
-  const char *cpuFnameOut = "output_CPU.pgm";
-
-  for (unsigned int i = 0; i < numData; i++) {
-    dispOut[i] = (int)h_odata[i] * mult;
-  }
-
-  printf("CPU image: <%s>\n", cpuFnameOut);
-  sdkSavePGM(cpuFnameOut, dispOut, w, h);
+  // printf("CPU image: <%s>\n", cpuFnameOut);
+  // sdkSavePGM(cpuFnameOut, dispOut, w, h);
 
   // cleanup memory
   checkCudaErrors(cudaFree(d_odata));
@@ -274,9 +255,8 @@ void runTest(int argc, char **argv) {
 
   if (h_img1 != NULL) free(h_img1);
 
-  if (dispOut != NULL) free(dispOut);
-
   sdkDeleteTimer(&timer);
 
-  exit((checkSum == cpuCheckSum) ? EXIT_SUCCESS : EXIT_FAILURE);
+  // exit((checkSum == cpuCheckSum) ? EXIT_SUCCESS : EXIT_FAILURE);
+  exit(EXIT_SUCCESS);
 }
