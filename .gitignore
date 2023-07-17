@@ -4,6 +4,7 @@
 
 # ignore the benchmark_load file under the bin folder
 /bin/benchmark_load
+/tests/MLPerf/checkpoints
 
 # ignore all files with .out extension
 *.out
