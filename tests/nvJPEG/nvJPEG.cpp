@@ -31,6 +31,7 @@
 
 #include <cuda_runtime_api.h>
 #include "helper_nvJPEG.hxx"
+#include <chrono>
 
 int dev_malloc(void **p, size_t s) { return (int)cudaMalloc(p, s); }
 
@@ -347,6 +348,7 @@ int write_images(std::vector<nvjpegImage_t> &iout, std::vector<int> &widths,
     }
     std::cout << "Done writing decoded image to file: " << fname << std::endl;
   }
+  return EXIT_SUCCESS;
 }
 
 double process_images(FileNames &image_names, decode_params_t &params,
@@ -487,12 +489,12 @@ int main(int argc, const char *argv[]) {
     }
   }
 
-  params.batch_size = 1;
+  params.batch_size = 512;
   if ((pidx = findParamIndex(argv, argc, "-b")) != -1) {
     params.batch_size = std::atoi(argv[pidx + 1]);
   }
 
-  params.total_images = -1;
+  params.total_images = 4096;
   if ((pidx = findParamIndex(argv, argc, "-t")) != -1) {
     params.total_images = std::atoi(argv[pidx + 1]);
   }
@@ -554,10 +556,10 @@ int main(int argc, const char *argv[]) {
   cudaDeviceProp props;
   checkCudaErrors(cudaGetDeviceProperties(&props, params.dev));
 
-  printf("Using GPU %d (%s, %d SMs, %d th/SM max, CC %d.%d, ECC %s)\n",
-         params.dev, props.name, props.multiProcessorCount,
-         props.maxThreadsPerMultiProcessor, props.major, props.minor,
-         props.ECCEnabled ? "on" : "off");
+  // printf("Using GPU %d (%s, %d SMs, %d th/SM max, CC %d.%d, ECC %s)\n",
+  //        params.dev, props.name, props.multiProcessorCount,
+  //        props.maxThreadsPerMultiProcessor, props.major, props.minor,
+  //        props.ECCEnabled ? "on" : "off");
 
   nvjpegDevAllocator_t dev_allocator = {&dev_malloc, &dev_free};
   nvjpegPinnedAllocator_t pinned_allocator ={&host_malloc, &host_free};
@@ -588,21 +590,36 @@ int main(int argc, const char *argv[]) {
               << std::endl;
   }
 
-  std::cout << "Decoding images in directory: " << params.input_dir
-            << ", total " << params.total_images << ", batchsize "
-            << params.batch_size << std::endl;
+  // std::cout << "Decoding images in directory: " << params.input_dir
+  //           << ", total " << params.total_images << ", batchsize "
+  //           << params.batch_size << std::endl;
 
   double total;
+
+  uint64_t start_ts, end_ts;
+  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
   if (process_images(image_names, params, total)) return EXIT_FAILURE;
-  std::cout << "Total decoding time: " << total << std::endl;
-  std::cout << "Avg decoding time per image: " << total / params.total_images
-            << std::endl;
-  std::cout << "Avg images per sec: " << params.total_images / total
-            << std::endl;
-  std::cout << "Avg decoding time per batch: "
-            << total / ((params.total_images + params.batch_size - 1) /
-                        params.batch_size)
-            << std::endl;
+  
+  cudaDeviceSynchronize();
+  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+ 
+  // Write the timestamps to a file
+  std::ofstream outfile;
+  outfile.open("timestamps.csv");
+  outfile << "timestamp" << std::endl;
+  outfile << start_ts << std::endl;
+  outfile << end_ts << std::endl;
+  outfile.close();
+
+  // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 /  params.total_images * params.batch_size);
+  // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
+
+  
+  // std::cout << "Total decoding time: " << total << std::endl;
+  // std::cout << "Avg decoding time per image: " << total / params.total_images << std::endl;
+  // std::cout << "Avg images per sec: " << params.total_images / total << std::endl;
+  // std::cout << "Avg decoding time per batch: " << total/((params.total_images+params.batch_size-1)/params.batch_size) << std::endl;
 
   if(params.pipelined ){ 
     destroy_decoupled_api_handles(params);

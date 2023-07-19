@@ -13,6 +13,7 @@ from multiprocessing import Pool
 import struct
 from scipy.optimize import minimize
 import csv
+import json
 
 class GPU_pwr_benchmark:
     def __init__(self, sw_meas, gpu_id=0, PMD=0, verbose=False):
@@ -24,7 +25,7 @@ class GPU_pwr_benchmark:
         self.sw_meas = sw_meas
         self.gpu_id = gpu_id
         self.PMD = PMD
-        self.aliasing_ratios = [1/2, 2/3, 3/4, 4/5, 6/5, 5/4, 4/3]
+        self.aliasing_ratios = [1/2, 2/3, 4/5, 6/5, 4/3]
         self.pwr_draw_options = {
             'power.draw': False,
             'power.draw.average': False,
@@ -61,10 +62,13 @@ class GPU_pwr_benchmark:
 
         if not os.path.exists('/tmp'): os.makedirs('/tmp')
         self._recompile_load()
-        self._warm_up()
+        # self._warm_up()
 
-        self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
-        self.pwr_update_freq = self._find_pwr_update_freq()
+        # self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
+        # self.pwr_update_freq = self._find_pwr_update_freq()
+        self.scale_gradient, self.scale_intercept = 43877.8, -2322
+        self.pwr_update_freq = 100
+        self.jet_lag = -1
     
     def _log(self, message, end='\n'):
         with open(self.log_file, 'a') as f:
@@ -175,9 +179,9 @@ class GPU_pwr_benchmark:
         store_path = os.path.join(self.result_dir, 'Preparation', 'warm_up')
         os.makedirs(store_path)
 
-        # While loop that run for at least 60 seconds
+        # While loop that run for at least 30 seconds
         start_time = time.time()
-        while time.time() - start_time < 60:
+        while time.time() - start_time < 5:
             self._run_benchmark(1, '50,1000000,20,100', store_path)
         print('done')
         self._log('done')
@@ -379,6 +383,206 @@ class GPU_pwr_benchmark:
                     config = f'{load_pd},{niters},{repetitions},100'
                     self._run_benchmark(1, config, rep_store_path, delay=False)
                     time.sleep(random.random())
+        
+        elif experiment == 3:
+            # test the number of repetitions needed
+            print('_________________________________________________________________________________')
+            print('Running experiment 3: Finding the number of repetitions needed for convergence...')
+            self._log('_________________________________________________________________________________')
+            self._log('Running experiment 3: Finding the number of repetitions needed for convergence...')
+
+            os.makedirs(os.path.join(self.result_dir, 'Experiment_3'))
+
+            workload_length = [0.25, 1, 8]
+            grains = [64, 16, 4]
+            nums = [10, 8, 6]
+            shifts = [8, 8, 4]
+
+            counter = 0
+
+            for wl, grain, num, shift in zip(workload_length, grains, nums, shifts):
+                wl_length = int(self.pwr_update_freq * wl)
+                print(f'  Running experiment with workload length of {wl_length} ms...')
+                self._log(f'  Running experiment with workload length of {wl_length} ms...')
+                
+                # create the store path
+                wl_store_path = os.path.join(self.result_dir, 'Experiment_3', f'workload_{wl_length}_ms')
+                os.makedirs(wl_store_path)
+
+                
+                sft = 1
+                while sft <= shift:
+                    print(f'    With shift of {sft}...')
+                    self._log(f'    With shift of {sft}...')
+
+                    sft_store_path = os.path.join(wl_store_path, f'shift_{sft}')
+                    os.makedirs(sft_store_path)
+
+
+                    rep = stride_gen(mode='lin', grain=grain)
+                    for i in range(num):
+                        next(iter(rep))
+                        if sft > int(rep):  continue
+                        print(f'      With number of repetitions of {rep} ({i+1} of {num})', end='', flush=True)
+                        self._log(f'      With number of repetitions of {rep} ({i+1} of {num})...')
+
+                        rep_store_path = os.path.join(sft_store_path, f'rep_{rep}')
+                        os.makedirs(rep_store_path)
+
+                        counter += 1
+                        for iter_ in range(16):
+                            print('.', end='', flush=True)
+                        
+                            iter_store_path = os.path.join(rep_store_path, f'iter_{iter_}')
+                            os.makedirs(iter_store_path)
+
+                            for phase in range(sft):
+                                phase_store_path = os.path.join(iter_store_path, f'phase_{phase}')
+                                os.makedirs(phase_store_path)
+
+                                print(phase, int(rep*(1/sft)))
+
+                                
+
+                                niters = int(wl_length/2 * self.scale_gradient + self.scale_intercept)
+                                config = f'{wl_length/2},{niters},{int(rep*(1/sft))},100'
+                                self._run_benchmark(1, config, phase_store_path, delay=False)
+                                
+                                time.sleep(0.1/sft)
+
+                        
+                        
+                        print('')
+
+                    sft *= 2
+
+                print(f'    Total number of runs: {counter}')
+
+            # for _ in range(16):
+            #     repetitions = 10
+            #     period = self.pwr_update_freq / 0.2
+            #     niters = int(period/2 * self.scale_gradient + self.scale_intercept)
+            #     config = f'{period/2},{niters},{repetitions},100'
+            #     self._run_benchmark(1, config, store_path, delay=False)
+
+
+            #     # measure how long does it take to run the following code
+            #     time.sleep(0.5)
+
+            #     load = pd.read_csv(os.path.join(store_path, 'timestamps.csv'))
+            #     load.loc[-1] = load.loc[0] - 500000
+            #     load.index = load.index + 1
+            #     load = load.sort_index()
+            #     load['activity'] = (load.index / 2).astype(int) % 2
+            #     load['timestamp'] = (load['timestamp'] / 1000)
+            #     t0 = load['timestamp'][0]
+            #     load['timestamp'] -= t0
+            #     load.loc[load.index[-1], 'timestamp'] += 500
+            #     load.loc[load.index[-1], 'activity'] = 0
+            #     load.set_index('timestamp', inplace=True)
+            #     load.sort_index(inplace=True)
+
+            #     # nv_smi power data
+            #     power = pd.read_csv(os.path.join(store_path, 'gpudata.csv'))
+            #     power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+            #     power['timestamp'] += 60*60*1000 * self.jet_lag
+            #     power['timestamp'] -= t0
+            #     power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load.index[-1])]
+            #     power.set_index('timestamp', inplace=True)
+            #     power.sort_index(inplace=True)
+
+            #     PMD_data = self._convert_pmd_data(store_path)
+            #     PMD_data['timestamp'] -= t0
+            #     PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
+            #     PMD_data.set_index('timestamp', inplace=True)
+            #     PMD_data.sort_index(inplace=True)
+            
+            #     # get the timestamp value of the second row
+            #     start_ts = load.iloc[1].name
+            #     # get the timestamp value of the last row
+            #     end_ts = load.iloc[-2].name
+
+            #     power_option = ' power.draw [W]'
+
+            #     power_window = power[(power.index >= start_ts) & (power.index <= end_ts)]
+            #     # interpolate the lowerbound of the power data
+            #     lb_0 = power[power.index < start_ts].iloc[-1]
+            #     lb_1 = power[power.index > start_ts].iloc[0]
+            #     gradient = (lb_1[power_option] - lb_0[power_option]) / (lb_1.name - lb_0.name)
+            #     lb_p = lb_0[power_option] + gradient * (start_ts - lb_0.name)
+
+            #     # interpolate the upperbound of the power data
+            #     ub_0 = power[power.index < end_ts].iloc[-1]
+            #     ub_1 = power[power.index > end_ts].iloc[0]
+            #     gradient = (ub_1[power_option] - ub_0[power_option]) / (ub_1.name - ub_0.name)
+            #     ub_p = ub_0[power_option] + gradient * (end_ts - ub_0.name)
+
+            #     # create the power data frame
+            #     t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
+            #     p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
+            #     energy = np.trapz(p, t) / 1000 / repetitions
+
+            #     # calculate energy from PMD data
+            #     PMD_window = PMD_data[(PMD_data.index >= start_ts) & (PMD_data.index <= end_ts)]
+            #     energy_PMD = np.trapz(PMD_window['total_p'].to_numpy(), PMD_window.index.to_numpy()) / 1000 / repetitions
+
+            #     print(f'Energy PMD: {energy_PMD:.2f} J    Energy nv_smi: {energy:.2f} J')
+            #     # time.sleep(random.random())
+            #     time.sleep(0.75)
+
+
+        elif experiment == 4:
+            print('_____________________________________________________')
+            print('Running experiment 4: Energy measurement using PMD...')
+            self._log('_____________________________________________________')
+            self._log('Running experiment 4: Energy measurement using PMD...')
+
+            os.makedirs(os.path.join(self.result_dir, 'Experiment_4'))
+
+            # create a dictionary of the test name and executable command
+            tests_dict = {
+                '0.25_period'   : {'reps' : 32,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},32,100'},
+                '1.00_period'   : {'reps' : 8,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},8,100'},
+                '8.00_period'   : {'reps' : 4,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},4,100'},
+                'cublas_sgemm'  : {'reps' : 16,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
+                'cufft'         : {'reps' : 32,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
+                'nvJPEG'        : {'reps' : 8,    'config' : 'tests/nvJPEG/,./nvJPEG'},
+                'quasi_rnd_gen' : {'reps' : 1000, 'config' : 'tests/quasirandomGenerator/,./quasirandomGenerator'},
+                'stereo_disp'   : {'reps' : 64,   'config' : 'tests/stereoDisparity/,./stereoDisparity'},
+                'black_scholes' : {'reps' : 512,  'config' : 'tests/BlackScholes/,./BlackScholes'},
+                'resnet_50'     : {'reps' : 4,    'config' : 'tests/MLPerf/,./resnet50.py'},
+                'retina_net'    : {'reps' : 16,   'config' : 'tests/MLPerf/,./retinanet.py'},
+                'bert'          : {'reps' : 8,    'config' : 'tests/MLPerf/,./bert.py'},
+            }
+
+            with open(os.path.join(self.result_dir, 'Experiment_4', 'tests_dict.json'), 'w') as f: json.dump(tests_dict, f)
+
+            # enum through the tests with the enumerae function
+            for i, (test_name, value) in enumerate(tests_dict.items()):
+                print(f'  Measuring energy for test: {test_name} ', end='', flush=True)
+
+                if i < 3: exp = 1  
+                else    : exp = 2
+
+                # create a folder for the test
+                test_store_path = os.path.join(self.result_dir, 'Experiment_4', test_name)
+                os.makedirs(test_store_path)
+
+                num_repetitions = 16
+                for rep in range(num_repetitions):
+                    print('.', end='', flush=True)
+                    # create a folder for the repetition
+                    rep_store_path = os.path.join(test_store_path, f'rep_{rep}')
+                    os.makedirs(rep_store_path)
+
+                    if rep == 0:  self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
+                    self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
+                    time.sleep(random.random())
+
+
+                print(' Done!')
+
+
         else:
             raise ValueError(f'Invalid experiment number {experiment}')
 
@@ -405,10 +609,15 @@ class GPU_pwr_benchmark:
         with open(os.path.join(self.result_dir, 'Preparation', 'jet_lag.txt'), 'r') as f:  self.jet_lag = int(f.readline())
         print(f'Jet lag: {self.jet_lag} hours')
 
-        with open(os.path.join(self.result_dir, 'Preparation', 'pwr_draw_options.txt'), 'r') as f:
-            options = f.readline().split(',')[:-1]
-            for option in options:
-                self.pwr_draw_options[option] = True
+        try:
+            with open(os.path.join(self.result_dir, 'Preparation', 'pwr_draw_options.txt'), 'r') as f:
+                options = f.readline().split(',')[:-1]
+                for option in options:
+                    self.pwr_draw_options[option] = True
+        except FileNotFoundError:
+            print('No power draw options file found, using default options')
+            self.pwr_draw_options['power.draw'] = True
+
 
         dir_list = os.listdir(self.result_dir)
         continue_ = True
@@ -416,6 +625,9 @@ class GPU_pwr_benchmark:
             if 'Experiment_1' in dir_list:  continue_ = self.process_exp_1(os.path.join(self.result_dir, 'Experiment_1'))
         if exp == 'all' or exp == 2:
             if 'Experiment_2' in dir_list:  self.process_exp_2(os.path.join(self.result_dir, 'Experiment_2'))
+
+        if exp == 'all' or exp == 4:
+            if 'Experiment_4' in dir_list:  self.process_exp_4(os.path.join(self.result_dir, 'Experiment_4'))
 
         return continue_
 
@@ -1190,8 +1402,160 @@ class GPU_pwr_benchmark:
         plt.savefig(os.path.join(result_dir, 'result.svg'), format='svg', bbox_inches='tight')
         plt.close('all')
 
+    def process_exp_4(self, result_dir):
+        with open(os.path.join(result_dir, 'tests_dict.json'), 'r') as f:  tests_dict = json.load(f)
+
+        tests_list = os.listdir(result_dir)
+        tests_list.remove('tests_dict.json')
+
+        
+        for test in tests_list:
+            print(f'Processing test: {test}')
+            args = []
+            reps_list = os.listdir(os.path.join(result_dir, test))
+            reps_list.sort(key=lambda x: int(x.split('_')[-1]))
+            for reps in reps_list:
+                args.append(os.path.join(result_dir, test, reps))
+
+            E_PMD_avg = []
+            E_nvsmi_avg = []
+            for arg in args:
+                E_PMD, E_nvsmi = self._exp_4_process_single_run(arg)
+                E_PMD /= tests_dict[test]['reps']
+                E_nvsmi /= tests_dict[test]['reps']
+                E_PMD_avg.append(E_PMD)
+                E_nvsmi_avg.append(E_nvsmi)
+                print(f'  Energy PMD: {E_PMD:.6f} J    Energy nv_smi: {E_nvsmi:.6f} J')
+
+            #     break
+            # break
+            
+            E_PMD_avg = np.mean(E_PMD_avg)
+            E_nvsmi_avg = np.mean(E_nvsmi_avg)
+
+            print(f'  Average Energy PMD: {E_PMD_avg:.6f} J    Average Energy nv_smi: {E_nvsmi_avg:.6f} J')
 
 
+    def _exp_4_process_single_run(self, result_dir):
+        load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
+        load['timestamp'] = (load['timestamp'] / 1000)
+        t0 = load['timestamp'][0]
+        load['timestamp'] -= t0
+        load.set_index('timestamp', inplace=True)
+        load.sort_index(inplace=True)
+
+        # nv_smi power data
+        power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
+        power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+        power['timestamp'] += 60*60*1000 * self.jet_lag
+        power['timestamp'] -= t0
+        # power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load.index[-1])]
+        power.set_index('timestamp', inplace=True)
+        power.sort_index(inplace=True)
+
+        PMD_data = self._convert_pmd_data(result_dir)
+        PMD_data['timestamp'] -= t0
+        PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
+        PMD_data.set_index('timestamp', inplace=True)
+        PMD_data.sort_index(inplace=True)
+    
+        # get the timestamp value of the second row
+        start_ts = load.iloc[0].name
+        
+        # get the timestamp value of the last row
+        end_ts = load.iloc[-1].name
+
+        power_option = ' power.draw [W]'
+
+        power_window = power[(power.index >= start_ts) & (power.index <= end_ts)]
+        # interpolate the lowerbound of the power data
+        lb_0 = power[power.index < start_ts].iloc[-1]
+        lb_1 = power[power.index > start_ts].iloc[0]
+        gradient = (lb_1[power_option] - lb_0[power_option]) / (lb_1.name - lb_0.name)
+        lb_p = lb_0[power_option] + gradient * (start_ts - lb_0.name)
+
+        # interpolate the upperbound of the power data
+        ub_0 = power[power.index < end_ts].iloc[-1]
+        ub_1 = power[power.index > end_ts].iloc[0]
+        gradient = (ub_1[power_option] - ub_0[power_option]) / (ub_1.name - ub_0.name)
+        ub_p = ub_0[power_option] + gradient * (end_ts - ub_0.name)
+
+        # create the power data frame
+        t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
+        p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
+        energy_nvsmi = np.trapz(p, t) / 1000 / 1
+
+        # calculate energy from PMD data
+        PMD_window = PMD_data[(PMD_data.index >= start_ts) & (PMD_data.index <= end_ts)]
+        energy_PMD = np.trapz(PMD_window['total_p'].to_numpy(), PMD_window.index.to_numpy()) / 1000 / 1
+
+        return energy_PMD, energy_nvsmi
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class stride_gen:
+    def __init__(self, mode, grain):
+        self.mode = mode
+        self.grain = grain
+        self.i = 0
+        self.size = 0
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        if self.mode == 'lin':
+            if self.size <= self.grain:
+                self.size = 2**self.i
+            else:
+                self.size += self.grain
+        elif self.mode == 'exp':
+            if self.i < self.grain:
+                self.size += 1
+            else:
+                self.size += 2**(int(self.i/self.grain)-1)
+        self.i += 1
+    
+    def __str__(self):
+        return str(self.size)
+
+    def __int__(self):
+        return self.size
+
+    def __add__(self, x):
+        return self.size + x
+
+    def __rsub__(self, x):
+        return x - self.size
+
+    def __mul__(self, x):
+        return self.size * x
+
+    def __rtruediv__(self, x):
+        return x / self.size
+
+    def __itruediv__(self, x):
+        return self.size / x
+
+    def reset(self, grain = None):
+        self.i = 0
+        self.size = 0
+        if grain is not None:
+            self.grain = grain
 
 
 

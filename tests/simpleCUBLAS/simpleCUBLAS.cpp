@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <chrono>
 
 /* Includes, cuda */
 #include <cublas_v2.h>
@@ -42,7 +43,8 @@
 #include <helper_cuda.h>
 
 /* Matrix size */
-#define N (10000)
+#define N (8192)
+#define REPEAT (16)
 
 /* Main */
 int main(int argc, char **argv) {
@@ -69,7 +71,7 @@ int main(int argc, char **argv) {
   }
 
   /* Initialize CUBLAS */
-  printf("simpleCUBLAS test running..\n");
+  // printf("simpleCUBLAS test running..\n");
 
   status = cublasCreate(&handle);
 
@@ -148,37 +150,47 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  printf("Kernel Executing..\n");
+  // printf("simpleCUBLAS warming up...\n");
+  for (int i = 0; i < 3; i++)    status = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, d_A, N, d_B, N, &beta, d_C, N);
+  // sync cuda device
+  cudaDeviceSynchronize();
+
+  // printf("Kernel Executing..\n");
+
+  uint64_t start_ts, end_ts;
+  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+
   /* Performs operation using cublas */
-  status = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, d_A,
-                       N, d_B, N, &beta, d_C, N);
+  for (int i = 0; i < REPEAT; i++)    status = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, d_A, N, d_B, N, &beta, d_C, N);
+
+
+  cudaDeviceSynchronize();
+  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
 
   if (status != CUBLAS_STATUS_SUCCESS) {
     fprintf(stderr, "!!!! kernel execution error.\n");
     return EXIT_FAILURE;
   }
-  printf("Kernel Executed..\n");
 
-  /* Allocate host memory for reading back the result from device memory */
-  h_C = reinterpret_cast<float *>(malloc(n2 * sizeof(h_C[0])));
+  // printf("Kernel Executed..\n");
 
-  if (h_C == 0) {
-    fprintf(stderr, "!!!! host memory allocation error (C)\n");
-    return EXIT_FAILURE;
-  }
+  // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
+  // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
 
-  /* Read the result back */
-  status = cublasGetVector(n2, sizeof(h_C[0]), d_C, 1, h_C, 1);
+  // Write the timestamps to a file
+  std::ofstream outfile;
+  outfile.open("timestamps.csv");
+  outfile << "timestamp" << std::endl;
+  outfile << start_ts << std::endl;
+  outfile << end_ts << std::endl;
+  outfile.close();
 
-  if (status != CUBLAS_STATUS_SUCCESS) {
-    fprintf(stderr, "!!!! device access error (read C)\n");
-    return EXIT_FAILURE;
-  }
 
   /* Memory clean up */
   free(h_A);
   free(h_B);
-  free(h_C);
 
   if (cudaFree(d_A) != cudaSuccess) {
     fprintf(stderr, "!!!! memory free error (A)\n");
@@ -203,7 +215,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  printf("Done\n");
+  // printf("Done\n");
   exit(EXIT_SUCCESS);
 
 }

@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <chrono>
 
 // includes, project
 #include <cuda_runtime.h>
@@ -43,8 +44,8 @@
 // Complex data type
 typedef float2 Complex;
 
-// The filter size is assumed to be a number smaller than the signal size
-#define SIGNAL_SIZE 200000000
+#define SIGNAL_SIZE 300000000
+#define REPEAT (32)
 
 int main(int argc, char **argv) { 
   findCudaDevice(argc, (const char **)argv); 
@@ -69,20 +70,38 @@ int main(int argc, char **argv) {
   cufftHandle plan;
   checkCudaErrors(cufftPlan1d(&plan, SIGNAL_SIZE, CUFFT_C2C, 1));
 
-  printf("Transforming signal cufftExecC2C\n");
-  for (int i = 0; i < 100; i++) {
-    // Transform signal and kernel
-    checkCudaErrors(cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal),
-                                reinterpret_cast<cufftComplex *>(d_signal),
-                                CUFFT_FORWARD));
-  }
-  // sychronize
+
+
+  for (int i = 0; i < 2; i++) cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal), reinterpret_cast<cufftComplex *>(d_signal), CUFFT_FORWARD);
   checkCudaErrors(cudaDeviceSynchronize());
-  printf("Done\n");
+
+  // printf("Transforming signal cufftExecC2C\n");
+
+  uint64_t start_ts, end_ts;
+  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+  for (int i = 0; i < REPEAT; i++) cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal), reinterpret_cast<cufftComplex *>(d_signal), CUFFT_FORWARD);
+  checkCudaErrors(cudaDeviceSynchronize());
+
+  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+
+
+  // printf("Done\n");
+  // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
+  // printf("Total runtime: %f ms\n", (end_ts - start_ts) / 1000.0);
+
+  // Write the timestamps to a file
+  std::ofstream outfile;
+  outfile.open("timestamps.csv");
+  outfile << "timestamp" << std::endl;
+  outfile << start_ts << std::endl;
+  outfile << end_ts << std::endl;
+  outfile.close();
 
   // Copy device memory to host
-  Complex *h_fft_signal = h_signal;
-  checkCudaErrors(cudaMemcpy(h_fft_signal, d_signal, mem_size, cudaMemcpyDeviceToHost));
+  // Complex *h_fft_signal = h_signal;
+  // checkCudaErrors(cudaMemcpy(h_fft_signal, d_signal, mem_size, cudaMemcpyDeviceToHost));
 
   // Destroy CUFFT context
   checkCudaErrors(cufftDestroy(plan));

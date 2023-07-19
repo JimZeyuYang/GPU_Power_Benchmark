@@ -5,7 +5,14 @@ import torch
 import time
 from faker import Faker
 
+
+import warnings
+
 def main():
+    REPEAT = 8
+
+    warnings.filterwarnings('ignore')
+
     if not torch.cuda.is_available():
         print("CUDA is not available. Please check your setup.")
         exit()
@@ -52,19 +59,27 @@ def main():
     # Move the model to the GPU
     model = model.to(device)
 
-    start_time = time.time()
-    # Predict hidden states features for each layer
-    with torch.no_grad():
-        outputs = model(input_ids, attention_mask=attention_masks)
-    
+    # warm up
+    with torch.no_grad():  model(input_ids, attention_mask=attention_masks)
     torch.cuda.synchronize()
-    end_time = time.time()
 
-    print("Time taken for inference: {:.2f} seconds".format(end_time - start_time))
+    start_ts = int(time.time() * 1_000_000)
 
+    with torch.no_grad():
+        for i in range(REPEAT):
+            model(input_ids, attention_mask=attention_masks)
+    torch.cuda.synchronize()
 
+    end_ts = int(time.time() * 1_000_000)
 
+    # Store timestamps in a file
+    with open("timestamps.csv", "w") as f:
+        f.write("timestamp\n")
+        f.write(str(start_ts) + "\n")
+        f.write(str(end_ts) + "\n")
 
+    # print("Time spent per batch: {:.3f} ms".format((end_ts - start_ts) / 1000 / REPEAT))
+    # print("Total runtime: {:.3f} ms".format((end_ts - start_ts) / 1000))
 
 
 if __name__ == '__main__':

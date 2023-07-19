@@ -34,6 +34,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <chrono>
+
 
 // includes, kernels
 #include <cuda_runtime.h>
@@ -45,6 +47,8 @@
 #include <helper_string.h>  // helper functions for string parsing
 
 static const char *sSDKsample = "[stereoDisparity]\0";
+#define REPEAT (64)
+
 
 int iDivUp(int a, int b) { return ((a % b) != 0) ? (a / b + 1) : (a / b); }
 
@@ -56,7 +60,7 @@ void runTest(int argc, char **argv);
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv) {
-  printf("%s Starting...\n\n", sSDKsample);
+  // printf("%s Starting...\n\n", sSDKsample);
   runTest(argc, argv);
 }
 
@@ -75,9 +79,9 @@ void runTest(int argc, char **argv) {
   checkCudaErrors(cudaGetDeviceProperties(&deviceProp, dev));
 
   // Statistics about the GPU device
-  printf(
-      "> GPU device has %d Multi-Processors, SM %d.%d compute capabilities\n\n",
-      deviceProp.multiProcessorCount, deviceProp.major, deviceProp.minor);
+  // printf(
+  //     "> GPU device has %d Multi-Processors, SM %d.%d compute capabilities\n\n",
+  //     deviceProp.multiProcessorCount, deviceProp.major, deviceProp.minor);
 
   StopWatchInterface *timer;
   sdkCreateTimer(&timer);
@@ -96,13 +100,13 @@ void runTest(int argc, char **argv) {
   char *fname0 = sdkFindFilePath("upscaled_stereo.im0.640x533.ppm", argv[0]);
   char *fname1 = sdkFindFilePath("upscaled_stereo.im1.640x533.ppm", argv[0]);
 
-  printf("Loaded <%s> as image 0\n", fname0);
+  // printf("Loaded <%s> as image 0\n", fname0);
 
   if (!sdkLoadPPM4ub(fname0, &h_img0, &w, &h)) {
     fprintf(stderr, "Failed to load <%s>\n", fname0);
   }
 
-  printf("Loaded <%s> as image 1\n", fname1);
+  // printf("Loaded <%s> as image 1\n", fname1);
 
   if (!sdkLoadPPM4ub(fname1, &h_img1, &w, &h)) {
     fprintf(stderr, "Failed to load <%s>\n", fname1);
@@ -189,16 +193,36 @@ void runTest(int argc, char **argv) {
   checkCudaErrors(cudaEventCreate(&start));
   checkCudaErrors(cudaEventCreate(&stop));
 
-  printf("Launching CUDA stereoDisparityKernel()\n");
+  // printf("Launching CUDA stereoDisparityKernel()\n");
 
   // Record the start event
   checkCudaErrors(cudaEventRecord(start, NULL));
 
+
+
+  for (int i = 0; i < 2; i++) stereoDisparityKernel<<<numBlocks, numThreads>>> (d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
+  cudaDeviceSynchronize();
+  uint64_t start_ts, end_ts;
+  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
   // launch the stereoDisparity kernel
-  for (int i = 0; i < 1; i++) {
-  stereoDisparityKernel<<<numBlocks, numThreads>>>(
-      d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
-  }
+  for (int i = 0; i < REPEAT; i++) stereoDisparityKernel<<<numBlocks, numThreads>>> (d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
+
+  cudaDeviceSynchronize();
+  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+
+  // Write the timestamps to a file
+  std::ofstream outfile;
+  outfile.open("timestamps.csv");
+  outfile << "timestamp" << std::endl;
+  outfile << start_ts << std::endl;
+  outfile << end_ts << std::endl;
+  outfile.close();
+
+  // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
+  // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
+
 
   // Record the stop event
   checkCudaErrors(cudaEventRecord(stop, NULL));
@@ -220,7 +244,7 @@ void runTest(int argc, char **argv) {
   // printf("Kernel size [%dx%d], ", (2 * RAD + 1), (2 * RAD + 1));
   // printf("Disparities [%d:%d]\n", minDisp, maxDisp);
 
-  printf("GPU processing time : %.4f (ms)\n", msecTotal);
+  // printf("GPU processing time : %.4f (ms)\n", msecTotal);
   // printf("Pixel throughput    : %.3f Mpixels/sec\n",
   //        ((float)(w * h * 1000.f) / msecTotal) / 1000000);
 

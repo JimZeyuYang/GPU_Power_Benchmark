@@ -33,6 +33,7 @@
 
 #include <helper_functions.h>  // helper functions for string parsing
 #include <helper_cuda.h>  // helper functions CUDA error checking and initialization
+#include <chrono>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Process an array of optN options on CPU
@@ -59,7 +60,7 @@ float RandFloat(float low, float high) {
 ////////////////////////////////////////////////////////////////////////////////
 // Data configuration
 ////////////////////////////////////////////////////////////////////////////////
-const int OPT_N = 8000000;
+const int OPT_N = 100000000;
 const int NUM_ITERATIONS = 512;
 
 const int OPT_SZ = OPT_N * sizeof(float);
@@ -73,7 +74,7 @@ const float VOLATILITY = 0.30f;
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv) {
   // Start logs
-  printf("[%s] - Starting...\n", argv[0]);
+  // printf("[%s] - Starting...\n", argv[0]);
 
   //'h_' prefix - CPU (host) memory space
   float
@@ -102,8 +103,8 @@ int main(int argc, char **argv) {
 
   sdkCreateTimer(&hTimer);
 
-  printf("Initializing data...\n");
-  printf("...allocating CPU memory for options.\n");
+  // printf("Initializing data...\n");
+  // printf("...allocating CPU memory for options.\n");
   h_CallResultCPU = (float *)malloc(OPT_SZ);
   h_PutResultCPU = (float *)malloc(OPT_SZ);
   h_CallResultGPU = (float *)malloc(OPT_SZ);
@@ -112,14 +113,14 @@ int main(int argc, char **argv) {
   h_OptionStrike = (float *)malloc(OPT_SZ);
   h_OptionYears = (float *)malloc(OPT_SZ);
 
-  printf("...allocating GPU memory for options.\n");
+  // printf("...allocating GPU memory for options.\n");
   checkCudaErrors(cudaMalloc((void **)&d_CallResult, OPT_SZ));
   checkCudaErrors(cudaMalloc((void **)&d_PutResult, OPT_SZ));
   checkCudaErrors(cudaMalloc((void **)&d_StockPrice, OPT_SZ));
   checkCudaErrors(cudaMalloc((void **)&d_OptionStrike, OPT_SZ));
   checkCudaErrors(cudaMalloc((void **)&d_OptionYears, OPT_SZ));
 
-  printf("...generating input data in CPU mem.\n");
+  // printf("...generating input data in CPU mem.\n");
   srand(5347);
 
   // Generate options set
@@ -131,7 +132,7 @@ int main(int argc, char **argv) {
     h_OptionYears[i] = RandFloat(0.25f, 10.0f);
   }
 
-  printf("...copying input data to GPU mem.\n");
+  // printf("...copying input data to GPU mem.\n");
   // Copy options data to GPU memory for further processing
   checkCudaErrors(
       cudaMemcpy(d_StockPrice, h_StockPrice, OPT_SZ, cudaMemcpyHostToDevice));
@@ -139,13 +140,23 @@ int main(int argc, char **argv) {
                              cudaMemcpyHostToDevice));
   checkCudaErrors(
       cudaMemcpy(d_OptionYears, h_OptionYears, OPT_SZ, cudaMemcpyHostToDevice));
-  printf("Data init done.\n\n");
+  // printf("Data init done.\n\n");
 
-  printf("Executing Black-Scholes GPU kernel (%i iterations)...\n",
-         NUM_ITERATIONS);
+  // printf("Executing Black-Scholes GPU kernel (%i iterations)...\n", NUM_ITERATIONS);
+  for (i = 0; i < 10; i++) {
+    BlackScholesGPU<<<DIV_UP((OPT_N / 2), 128), 128 /*480, 128*/>>>(
+        (float2 *)d_CallResult, (float2 *)d_PutResult, (float2 *)d_StockPrice,
+        (float2 *)d_OptionStrike, (float2 *)d_OptionYears, RISKFREE, VOLATILITY,
+        OPT_N);
+    getLastCudaError("BlackScholesGPU() execution failed\n");
+  }
   checkCudaErrors(cudaDeviceSynchronize());
   sdkResetTimer(&hTimer);
   sdkStartTimer(&hTimer);
+
+  uint64_t start_ts, end_ts;
+  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
 
   for (i = 0; i < NUM_ITERATIONS; i++) {
     BlackScholesGPU<<<DIV_UP((OPT_N / 2), 128), 128 /*480, 128*/>>>(
@@ -154,31 +165,47 @@ int main(int argc, char **argv) {
         OPT_N);
     getLastCudaError("BlackScholesGPU() execution failed\n");
   }
-
   checkCudaErrors(cudaDeviceSynchronize());
+
+
+  cudaDeviceSynchronize();
+  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+  // Write the timestamps to a file
+  std::ofstream outfile;
+  outfile.open("timestamps.csv");
+  outfile << "timestamp" << std::endl;
+  outfile << start_ts << std::endl;
+  outfile << end_ts << std::endl;
+  outfile.close();
+
+  // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / NUM_ITERATIONS);
+  // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
+
   sdkStopTimer(&hTimer);
   gpuTime = sdkGetTimerValue(&hTimer);
 
+
   // Both call and put is calculated
-  printf("Options count             : %i     \n", 2 * OPT_N);
-  printf("BlackScholesGPU() time    : %f msec\n", gpuTime);
-  printf("Effective memory bandwidth: %f GB/s\n",
-         ((double)(5 * OPT_N * sizeof(float)) * 1E-9) / (gpuTime * 1E-3));
-  printf("Gigaoptions per second    : %f     \n\n",
-         ((double)(2 * OPT_N) * 1E-9) / (gpuTime * 1E-3));
+  // printf("Options count             : %i     \n", 2 * OPT_N);
+  // printf("BlackScholesGPU() time    : %f msec\n", gpuTime);
+  // printf("Effective memory bandwidth: %f GB/s\n",
+  //        ((double)(5 * OPT_N * sizeof(float)) * 1E-9) / (gpuTime * 1E-3));
+  // printf("Gigaoptions per second    : %f     \n\n",
+  //        ((double)(2 * OPT_N) * 1E-9) / (gpuTime * 1E-3));
 
-  printf(
-      "BlackScholes, Throughput = %.4f GOptions/s, Time = %.5f s, Size = %u "
-      "options, NumDevsUsed = %u, Workgroup = %u\n",
-      (((double)(2.0 * OPT_N) * 1.0E-9) / (gpuTime * 1.0E-3)), gpuTime * 1e-3,
-      (2 * OPT_N), 1, 128);
+  // printf(
+  //     "BlackScholes, Throughput = %.4f GOptions/s, Time = %.5f s, Size = %u "
+  //     "options, NumDevsUsed = %u, Workgroup = %u\n",
+  //     (((double)(2.0 * OPT_N) * 1.0E-9) / (gpuTime * 1.0E-3)), gpuTime * 1e-3,
+  //     (2 * OPT_N), 1, 128);
 
-  printf("\nReading back GPU results...\n");
+  // printf("\nReading back GPU results...\n");
   // Read back GPU results to compare them to CPU results
-  checkCudaErrors(cudaMemcpy(h_CallResultGPU, d_CallResult, OPT_SZ,
-                             cudaMemcpyDeviceToHost));
-  checkCudaErrors(
-      cudaMemcpy(h_PutResultGPU, d_PutResult, OPT_SZ, cudaMemcpyDeviceToHost));
+  // checkCudaErrors(cudaMemcpy(h_CallResultGPU, d_CallResult, OPT_SZ,
+  //                            cudaMemcpyDeviceToHost));
+  // checkCudaErrors(
+  //     cudaMemcpy(h_PutResultGPU, d_PutResult, OPT_SZ, cudaMemcpyDeviceToHost));
 
   // printf("Checking the results...\n");
   // printf("...running CPU calculations.\n\n");

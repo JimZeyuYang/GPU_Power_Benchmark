@@ -8,7 +8,7 @@ def upscale_image(filename):
     width, height = img.size
 
     # Calculate the new size
-    ratio = 4
+    ratio = 8
     new_size = (width*ratio, height*ratio)
 
     # Resize the image

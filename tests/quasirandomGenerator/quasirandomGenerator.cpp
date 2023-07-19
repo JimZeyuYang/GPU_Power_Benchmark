@@ -32,6 +32,7 @@
 #include <helper_functions.h>
 #include <helper_cuda.h>
 
+#include <chrono>
 #include "quasirandomGenerator_common.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -57,10 +58,11 @@ extern "C" void inverseCNDgpu(float *d_Output, unsigned int *d_Input,
                               unsigned int N);
 
 const int N = 10485760;
+#define REPEAT 1000
 
 int main(int argc, char **argv) {
   // Start logs
-  printf("%s Starting...\n\n", argv[0]);
+  // printf("%s Starting...\n\n", argv[0]);
 
   unsigned int tableCPU[QRNG_DIMENSIONS][QRNG_RESOLUTION];
 
@@ -78,21 +80,24 @@ int main(int argc, char **argv) {
 
   sdkCreateTimer(&hTimer);
 
-  printf("Allocating GPU memory...\n");
-  checkCudaErrors(
-      cudaMalloc((void **)&d_Output, QRNG_DIMENSIONS * N * sizeof(float)));
+  // printf("Allocating GPU memory...\n");
+  checkCudaErrors(cudaMalloc((void **)&d_Output, QRNG_DIMENSIONS * N * sizeof(float)));
 
-  printf("Allocating CPU memory...\n");
+  // printf("Allocating CPU memory...\n");
   h_OutputGPU = (float *)malloc(QRNG_DIMENSIONS * N * sizeof(float));
 
-  printf("Initializing QRNG tables...\n\n");
+  // printf("Initializing QRNG tables...\n\n");
   initQuasirandomGenerator(tableCPU);
-
   initTableGPU(tableCPU);
 
-  printf("Testing QRNG...\n\n");
+  // printf("Testing QRNG...\n\n");
   checkCudaErrors(cudaMemset(d_Output, 0, QRNG_DIMENSIONS * N * sizeof(float)));
-  int numIterations = 1000;
+  int numIterations = REPEAT;
+
+
+  uint64_t start_ts, end_ts;
+  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+ 
 
   for (int i = -1; i < numIterations; i++) {
     if (i == 0) {
@@ -104,19 +109,34 @@ int main(int argc, char **argv) {
     quasirandomGeneratorGPU(d_Output, 0, N);
   }
 
+  cudaDeviceSynchronize();
+  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+
+  // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
+  // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
+
+  // Write the timestamps to a file
+  std::ofstream outfile;
+  outfile.open("timestamps.csv");
+  outfile << "timestamp" << std::endl;
+  outfile << start_ts << std::endl;
+  outfile << end_ts << std::endl;
+  outfile.close();
+
   checkCudaErrors(cudaDeviceSynchronize());
   sdkStopTimer(&hTimer);
   gpuTime = sdkGetTimerValue(&hTimer) / (double)numIterations * 1e-3;
-  printf(
-      "quasirandomGenerator, Throughput = %.4f GNumbers/s, Time = %.5f s, Size "
-      "= %u Numbers, NumDevsUsed = %u, Workgroup = %u\n",
-      (double)QRNG_DIMENSIONS * (double)N * 1.0E-9 / gpuTime, gpuTime,
-      QRNG_DIMENSIONS * N, 1, 128 * QRNG_DIMENSIONS);
+  // printf(
+  //     "quasirandomGenerator, Throughput = %.4f GNumbers/s, Time = %.5f s, Size "
+  //     "= %u Numbers, NumDevsUsed = %u, Workgroup = %u\n",
+  //     (double)QRNG_DIMENSIONS * (double)N * 1.0E-9 / gpuTime, gpuTime,
+  //     QRNG_DIMENSIONS * N, 1, 128 * QRNG_DIMENSIONS);
 
-  printf("\nReading GPU results...\n");
-  checkCudaErrors(cudaMemcpy(h_OutputGPU, d_Output,
-                             QRNG_DIMENSIONS * N * sizeof(float),
-                             cudaMemcpyDeviceToHost));
+  // printf("\nReading GPU results...\n");
+  // checkCudaErrors(cudaMemcpy(h_OutputGPU, d_Output,
+  //                            QRNG_DIMENSIONS * N * sizeof(float),
+  //                            cudaMemcpyDeviceToHost));
   
   
   exit(EXIT_SUCCESS);

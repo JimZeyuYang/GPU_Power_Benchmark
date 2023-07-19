@@ -51,6 +51,43 @@ void printDevProps(cudaDeviceProp devProp) {
 }
 
 
+void start_PMD(int& serial_port, uint64_t& PMD_start, pthread_t& serialThread, ThreadArgs* args, std::string result_dir) {
+    serial_port = open_serial_port();
+    change_baud_rate(serial_port, 921600);
+    if (!handshake(serial_port)) {
+        std::cout << "Error: handshake failed" << std::endl;
+        exit(-1);
+    }
+
+    args = new ThreadArgs;
+    args->serial_port = serial_port;
+    args->file_path = result_dir;
+
+    config_cont_tx(serial_port, true);
+    PMD_start = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    
+    int rc = pthread_create(&serialThread, NULL, logSerialPort, args);
+    if (rc) {
+        std::cout << "Error: unable to create thread, " << rc << std::endl;
+        exit(-1);
+    }
+}
+
+void stop_PMD(int& serial_port, pthread_t& serialThread, ThreadArgs*& args, std::string result_dir, uint64_t PMD_start) {
+    config_cont_tx(serial_port, false);
+    pthread_join(serialThread, NULL);
+    delete args;
+    change_baud_rate(serial_port, 115200);
+    close(serial_port);
+
+    std::ofstream outfile;
+    std::string filename = result_dir + "/PMD_start_ts.txt";
+    outfile.open(filename);
+    outfile << PMD_start << std::endl;
+    outfile.close();
+} 
+
+
 int main(int argc, const char **argv) {
     int experiment = std::stoi(argv[1]);
     std::string config = argv[2];
@@ -60,7 +97,7 @@ int main(int argc, const char **argv) {
     int gpu_id = std::stoi(argv[6]);
     
     std::stringstream ss(config);  std::string token;
-    
+
     cudaSetDevice(gpu_id);
 
     // initialize GPU and get device properties
@@ -69,8 +106,6 @@ int main(int argc, const char **argv) {
     cudaDeviceProp devProp = getDeviceProperties();
     // printDevProps(devProp);
 
-    float *h_x, *d_x;
-    int nblocks, nthreads, nsize;
 
     if (experiment == 1) {  // Experiment 1: Steady state and transient response / avg window analysis
         // Read the config variables
@@ -79,6 +114,8 @@ int main(int argc, const char **argv) {
         getline(ss, token, ',');  int testLength = std::stoi(token);
         getline(ss, token, ',');  int percent    = std::stoi(token);
 
+        float *h_x, *d_x;
+        int nblocks, nthreads, nsize;
         // begin experiment
         // nblocks = devProp.maxBlocksPerMultiProcessor * devProp.multiProcessorCount;
         nblocks = devProp.multiProcessorCount * percent / 100;
@@ -99,32 +136,8 @@ int main(int argc, const char **argv) {
         //cudaEvent_t start, stop; cudaEventCreate(&start); cudaEventCreate(&stop);
         
         // Record data on PMD if enabled
-        int serial_port = 0;
-        uint64_t PMD_start = 0;
-        pthread_t serialThread;
-        ThreadArgs* args = nullptr;
-
-        if (PMD) {
-            serial_port = open_serial_port();
-            change_baud_rate(serial_port, 921600);
-            if (!handshake(serial_port)) {
-                std::cout << "Error: handshake failed" << std::endl;
-                exit(-1);
-            }
-
-            args = new ThreadArgs;
-            args->serial_port = serial_port;
-            args->file_path = result_dir;
-
-            config_cont_tx(serial_port, true);
-            PMD_start = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-            
-            int rc = pthread_create(&serialThread, NULL, logSerialPort, args);
-            if (rc) {
-                std::cout << "Error: unable to create thread, " << rc << std::endl;
-                exit(-1);
-            }
-        }
+        int serial_port = 0; uint64_t PMD_start = 0; pthread_t serialThread; ThreadArgs* args = nullptr;
+        if (PMD) start_PMD(serial_port, PMD_start, serialThread, args, result_dir);
 
 
         uint64_t timestamps[2*testLength+1];
@@ -157,19 +170,7 @@ int main(int argc, const char **argv) {
         timestamps[2*testLength] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         sleep(1);
 
-        if (PMD) {
-            config_cont_tx(serial_port, false);
-            pthread_join(serialThread, NULL);
-            delete args;
-            change_baud_rate(serial_port, 115200);
-            close(serial_port);
-
-            std::ofstream outfile;
-            std::string filename = result_dir + "/PMD_start_ts.txt";
-            outfile.open(filename);
-            outfile << PMD_start << std::endl;
-            outfile.close();
-        }
+        if (PMD) stop_PMD(serial_port, serialThread, args, result_dir, PMD_start);
 
         // Write the timestamps to a file
         std::ofstream outfile;
@@ -181,29 +182,46 @@ int main(int argc, const char **argv) {
             outfile << timestamps[i] << std::endl;
         }
         outfile.close();
+        
+        // Copy the result from device to host
+        checkCudaErrors(cudaMemcpy(h_x,d_x,nsize*sizeof(float), cudaMemcpyDeviceToHost));
+        // Check if the result is correct
+        float sum = 0.0;
+        for (int i=0; i<nsize; i++) sum += h_x[i];
 
-    } else if (experiment == 2) {  // Experiment 3: Finding averaging window using shifiting delay
-        // to be added if needed
+        // raise a error if sum/nsize != CHECK
+        if (sum/nsize != CHECK) {
+            printf("Warning: result is %f instead of %f\n", sum/nsize, CHECK);
+            // exit(EXIT_FAILURE);
+        }
+        
+        // free memory 
+        checkCudaErrors(cudaFree(d_x));  free(h_x);
+
+
+    } else if (experiment == 2) {  // Run a executable and take the measurements
+        getline(ss, token, ','); std::string path = token;
+        getline(ss, token, ','); std::string executable = token;
+
+        std::string cmd = "(cd " + path + " && " + executable + ")";
+        // std::cout << "Running the executable: " << cmd << std::endl;
+
+        int serial_port = 0; uint64_t PMD_start = 0; pthread_t serialThread; ThreadArgs* args = nullptr;
+        if (PMD) start_PMD(serial_port, PMD_start, serialThread, args, result_dir);
+        system(cmd.c_str());
+        if (PMD) stop_PMD(serial_port, serialThread, args, result_dir, PMD_start);
+
+        std::string mv_data = "mv " + path + "/timestamps.csv " + result_dir;
+        // std::cout << "Moving the timestamps file: " << mv_data << std::endl;
+        system(mv_data.c_str());
+
     } else {
             std::cout << "Invalid experiment number" << std::endl;
             exit(EXIT_FAILURE);
     }
 
 
-    // Copy the result from device to host
-    checkCudaErrors(cudaMemcpy(h_x,d_x,nsize*sizeof(float), cudaMemcpyDeviceToHost));
-    // Check if the result is correct
-    float sum = 0.0;
-    for (int i=0; i<nsize; i++) sum += h_x[i];
 
-    // raise a error if sum/nsize != CHECK
-    if (sum/nsize != CHECK) {
-        printf("Warning: result is %f instead of %f\n", sum/nsize, CHECK);
-        // exit(EXIT_FAILURE);
-    }
-    
-    // free memory 
-    checkCudaErrors(cudaFree(d_x));  free(h_x);
 
     // CUDA exit -- needed to flush printf write buffer
     cudaDeviceReset();
