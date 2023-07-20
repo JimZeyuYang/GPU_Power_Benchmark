@@ -62,13 +62,13 @@ class GPU_pwr_benchmark:
 
         if not os.path.exists('/tmp'): os.makedirs('/tmp')
         self._recompile_load()
-        # self._warm_up()
+        self._warm_up()
 
-        # self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
-        # self.pwr_update_freq = self._find_pwr_update_freq()
-        self.scale_gradient, self.scale_intercept = 43877.8, -2322
-        self.pwr_update_freq = 100
-        self.jet_lag = -1
+        self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
+        self.pwr_update_freq = self._find_pwr_update_freq()
+        # self.scale_gradient, self.scale_intercept = 43877.8, -2322
+        # self.pwr_update_freq = 100
+        # self.jet_lag = -1
     
     def _log(self, message, end='\n'):
         with open(self.log_file, 'a') as f:
@@ -409,7 +409,6 @@ class GPU_pwr_benchmark:
                 wl_store_path = os.path.join(self.result_dir, 'Experiment_3', f'workload_{wl_length}_ms')
                 os.makedirs(wl_store_path)
 
-                
                 sft = 1
                 while sft <= shift:
                     print(f'    With shift of {sft}...')
@@ -439,96 +438,17 @@ class GPU_pwr_benchmark:
                             for phase in range(sft):
                                 phase_store_path = os.path.join(iter_store_path, f'phase_{phase}')
                                 os.makedirs(phase_store_path)
-
-                                print(phase, int(rep*(1/sft)))
-
                                 
-
                                 niters = int(wl_length/2 * self.scale_gradient + self.scale_intercept)
                                 config = f'{wl_length/2},{niters},{int(rep*(1/sft))},100'
                                 self._run_benchmark(1, config, phase_store_path, delay=False)
                                 
                                 time.sleep(0.1/sft)
-
-                        
+                            time.sleep(random.random())
                         
                         print('')
-
                     sft *= 2
 
-                print(f'    Total number of runs: {counter}')
-
-            # for _ in range(16):
-            #     repetitions = 10
-            #     period = self.pwr_update_freq / 0.2
-            #     niters = int(period/2 * self.scale_gradient + self.scale_intercept)
-            #     config = f'{period/2},{niters},{repetitions},100'
-            #     self._run_benchmark(1, config, store_path, delay=False)
-
-
-            #     # measure how long does it take to run the following code
-            #     time.sleep(0.5)
-
-            #     load = pd.read_csv(os.path.join(store_path, 'timestamps.csv'))
-            #     load.loc[-1] = load.loc[0] - 500000
-            #     load.index = load.index + 1
-            #     load = load.sort_index()
-            #     load['activity'] = (load.index / 2).astype(int) % 2
-            #     load['timestamp'] = (load['timestamp'] / 1000)
-            #     t0 = load['timestamp'][0]
-            #     load['timestamp'] -= t0
-            #     load.loc[load.index[-1], 'timestamp'] += 500
-            #     load.loc[load.index[-1], 'activity'] = 0
-            #     load.set_index('timestamp', inplace=True)
-            #     load.sort_index(inplace=True)
-
-            #     # nv_smi power data
-            #     power = pd.read_csv(os.path.join(store_path, 'gpudata.csv'))
-            #     power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-            #     power['timestamp'] += 60*60*1000 * self.jet_lag
-            #     power['timestamp'] -= t0
-            #     power = power[(power['timestamp'] >= 0) & (power['timestamp'] <= load.index[-1])]
-            #     power.set_index('timestamp', inplace=True)
-            #     power.sort_index(inplace=True)
-
-            #     PMD_data = self._convert_pmd_data(store_path)
-            #     PMD_data['timestamp'] -= t0
-            #     PMD_data = PMD_data[(PMD_data['timestamp'] >= 0) & (PMD_data['timestamp'] <= load.iloc[-1].name)]
-            #     PMD_data.set_index('timestamp', inplace=True)
-            #     PMD_data.sort_index(inplace=True)
-            
-            #     # get the timestamp value of the second row
-            #     start_ts = load.iloc[1].name
-            #     # get the timestamp value of the last row
-            #     end_ts = load.iloc[-2].name
-
-            #     power_option = ' power.draw [W]'
-
-            #     power_window = power[(power.index >= start_ts) & (power.index <= end_ts)]
-            #     # interpolate the lowerbound of the power data
-            #     lb_0 = power[power.index < start_ts].iloc[-1]
-            #     lb_1 = power[power.index > start_ts].iloc[0]
-            #     gradient = (lb_1[power_option] - lb_0[power_option]) / (lb_1.name - lb_0.name)
-            #     lb_p = lb_0[power_option] + gradient * (start_ts - lb_0.name)
-
-            #     # interpolate the upperbound of the power data
-            #     ub_0 = power[power.index < end_ts].iloc[-1]
-            #     ub_1 = power[power.index > end_ts].iloc[0]
-            #     gradient = (ub_1[power_option] - ub_0[power_option]) / (ub_1.name - ub_0.name)
-            #     ub_p = ub_0[power_option] + gradient * (end_ts - ub_0.name)
-
-            #     # create the power data frame
-            #     t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
-            #     p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
-            #     energy = np.trapz(p, t) / 1000 / repetitions
-
-            #     # calculate energy from PMD data
-            #     PMD_window = PMD_data[(PMD_data.index >= start_ts) & (PMD_data.index <= end_ts)]
-            #     energy_PMD = np.trapz(PMD_window['total_p'].to_numpy(), PMD_window.index.to_numpy()) / 1000 / repetitions
-
-            #     print(f'Energy PMD: {energy_PMD:.2f} J    Energy nv_smi: {energy:.2f} J')
-            #     # time.sleep(random.random())
-            #     time.sleep(0.75)
 
 
         elif experiment == 4:
@@ -578,7 +498,6 @@ class GPU_pwr_benchmark:
                     if rep == 0:  self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
                     self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
                     time.sleep(random.random())
-
 
                 print(' Done!')
 
