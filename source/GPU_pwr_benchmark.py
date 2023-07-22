@@ -181,7 +181,7 @@ class GPU_pwr_benchmark:
 
         # While loop that run for at least 30 seconds
         start_time = time.time()
-        while time.time() - start_time < 5:
+        while time.time() - start_time < 60:
             self._run_benchmark(1, '50,1000000,20,100', store_path)
         print('done')
         self._log('done')
