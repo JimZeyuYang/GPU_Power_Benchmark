@@ -50,7 +50,13 @@ def experiment(args):
             raise Exception('GPU model not specified')
         else:
             gpu, run = args.gpu.split(',')
-            benchmark.process_results(gpu, run)
+            if args.experiments is not None:
+                experiments = [int(x) for x in args.experiments.split(',')]
+
+                for experiment in experiments:
+                    benchmark.process_results(gpu, run, experiment)
+            else:
+                benchmark.process_results(gpu, run)
 
     end = time.time()
     print(f'Time taken: {(end - start) // 60} minutes {round((end - start) % 60, 2)} seconds')
