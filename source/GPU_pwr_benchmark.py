@@ -179,10 +179,10 @@ class GPU_pwr_benchmark:
         store_path = os.path.join(self.result_dir, 'Preparation', 'warm_up')
         os.makedirs(store_path)
 
-        # While loop that run for at least 30 seconds
+        # While loop that run for at least 200 seconds
         start_time = time.time()
-        while time.time() - start_time < 60:
-            self._run_benchmark(1, '50,1000000,20,100', store_path)
+        while time.time() - start_time < 200:
+            self._run_benchmark(1, '1,1000000,64,100', store_path)
         print('done')
         self._log('done')
 
@@ -394,13 +394,11 @@ class GPU_pwr_benchmark:
             os.makedirs(os.path.join(self.result_dir, 'Experiment_3'))
 
             workload_length = [0.25, 1, 8]
-            grains = [32, 4, 2]
-            nums = [13, 18, 9]
-            shifts = [8, 8, 4]
+            grains = [32, 4, 4]
+            nums = [13, 18, 10]
+            shifts = [1, 4, 8]
 
-            counter = 0
-
-            for wl, grain, num, shift in zip(workload_length, grains, nums, shifts):
+            for wl, grain, num in zip(workload_length, grains, nums):
                 wl_length = int(self.pwr_update_freq * wl)
                 print(f'  Running experiment with workload length of {wl_length} ms...')
                 self._log(f'  Running experiment with workload length of {wl_length} ms...')
@@ -409,45 +407,38 @@ class GPU_pwr_benchmark:
                 wl_store_path = os.path.join(self.result_dir, 'Experiment_3', f'workload_{wl}_pd')
                 os.makedirs(wl_store_path)
 
-                sft = 1
-                while sft <= shift:
-                    print(f'    With shift of {sft}...')
-                    self._log(f'    With shift of {sft}...')
+                for shift in shifts:
+                    print(f'    With shift of {shift}...')
+                    self._log(f'    With shift of {shift}...')
 
-                    sft_store_path = os.path.join(wl_store_path, f'shift_{sft}')
+                    sft_store_path = os.path.join(wl_store_path, f'shift_{shift}')
                     os.makedirs(sft_store_path)
 
 
                     rep = stride_gen(mode='lin', grain=grain)
                     for i in range(num):
                         next(iter(rep))
-                        if sft > int(rep):  continue
+                        if shift > int(rep):  continue
+                        if int(rep) % shift != 0: continue
                         print(f'      With number of repetitions of {rep} ({i+1} of {num})', end='', flush=True)
                         self._log(f'      With number of repetitions of {rep} ({i+1} of {num})...')
 
                         rep_store_path = os.path.join(sft_store_path, f'rep_{rep}')
                         os.makedirs(rep_store_path)
 
-                        counter += 1
-                        for iter_ in range(32):
+                        for iter_ in range(1):
                             print('.', end='', flush=True)
                         
                             iter_store_path = os.path.join(rep_store_path, f'iter_{iter_}')
                             os.makedirs(iter_store_path)
 
-                            for phase in range(sft):
-                                phase_store_path = os.path.join(iter_store_path, f'phase_{phase}')
-                                os.makedirs(phase_store_path)
-                                
-                                niters = int(wl_length/2 * self.scale_gradient + self.scale_intercept)
-                                config = f'{wl_length/2},{niters},{int(rep*(1/sft))},100'
-                                self._run_benchmark(1, config, phase_store_path, delay=False)
-                                
-                                time.sleep(0.1/sft)
+                            niters = int(wl_length/2 * self.scale_gradient + self.scale_intercept)
+                            config = f'{wl_length/2},{niters},{rep},{shift}'
+                            self._run_benchmark(3, config, iter_store_path, delay=False)
+
                             time.sleep(random.random())
                         
                         print('')
-                    sft *= 2
 
         elif experiment == 4:
             print('_____________________________________________________')
@@ -1473,31 +1464,34 @@ class GPU_pwr_benchmark:
         plt.close('all')
             
             
-            
-
-
     def _exp_3_calculate_power(self, result_dir):
-        def calculate_power(_dir):
-            load = pd.read_csv(os.path.join(_dir, 'timestamps.csv'))
-            load['timestamp'] = (load['timestamp'] / 1000)
-            t0 = load['timestamp'][0]
-            load['timestamp'] -= t0
-            load.set_index('timestamp', inplace=True)
-            load.sort_index(inplace=True)
+        num_shifts = int(result_dir.split('/')[-3].split('_')[-1])
 
-            # nv_smi power data
-            power = pd.read_csv(os.path.join(_dir, 'gpudata.csv'))
-            power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
-            power['timestamp'] += 60*60*1000 * self.jet_lag
-            power['timestamp'] -= t0
-            power['timestamp'] -= 25
-            power.set_index('timestamp', inplace=True)
-            power.sort_index(inplace=True)
 
-            start_ts = load.iloc[0].name
-            end_ts = load.iloc[-1].name
+        load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
+        load['timestamp'] = (load['timestamp'] / 1000)
+        t0 = load['timestamp'][0]
+        load['timestamp'] -= t0
+        load.set_index('timestamp', inplace=True)
+        load.sort_index(inplace=True)
 
-            power_option = ' power.draw [W]'
+        # nv_smi power data
+        power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
+        power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+        power['timestamp'] += 60*60*1000 * self.jet_lag
+        power['timestamp'] -= t0
+        power['timestamp'] -= 25
+        power.set_index('timestamp', inplace=True)
+        power.sort_index(inplace=True)
+
+        power_option = ' power.draw.instant [W]'
+        energy_nvsmi = 0
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+
+        for i in range(num_shifts):
+            start_ts = load.iloc[2*i].name
+            end_ts   = load.iloc[2*i+1].name
 
             power_window = power[(power.index >= start_ts) & (power.index <= end_ts)]
             # interpolate the lowerbound of the power data
@@ -1515,40 +1509,34 @@ class GPU_pwr_benchmark:
             # create the power data frame
             t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
             p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
-            energy_nvsmi = np.trapz(p, t) / 1000
+            energy_nvsmi += np.trapz(p, t) / 1000
 
-
-            # plot the data
-            fig, ax = plt.subplots(1, 1, figsize=(10, 5))
             # plot 2 verical lines at start_ts and end_ts
-            ax.axvline(start_ts, color='r', linestyle='--')
+            ax.axvline(start_ts, color='g', linestyle='--')
             ax.axvline(end_ts, color='r', linestyle='--')
 
-            ax.plot(power.index, power[power_option], label='nv_smi')
 
-            ax.set_xlim(start_ts-100, end_ts+100)
-            ax.set_xlabel('Time (ms)')
-            ax.set_ylabel('Power (W)')
-            ax.set_title('Power draw from nv_smi and PMD')
-            ax.legend(loc='upper right')
+        ax.plot(power.index, power[power_option], label='nv_smi')
 
-            
-            fig.set_size_inches(15, 9)
-            plt.savefig(os.path.join(_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-            plt.savefig(os.path.join(_dir, 'result.svg'), format='svg', bbox_inches='tight')
-            plt.close('all')
+        ax.set_xlim(load.iloc[0].name-100, load.iloc[-1].name+100)
+        ax.set_xlabel('Time (ms)')
+        ax.set_ylabel('Power (W)')
+        ax.set_title('Power draw from nv_smi and PMD')
+        ax.legend(loc='upper right')
+
+        
+        fig.set_size_inches(15, 9)
+        plt.savefig(os.path.join(result_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(result_dir, 'result.svg'), format='svg', bbox_inches='tight')
+        plt.close('all')
 
 
-            return energy_nvsmi
+        return energy_nvsmi
 
-        num_shifts = int(result_dir.split('/')[-3].split('_')[-1])
 
-        energy = 0
-        for i in range(num_shifts):
-            dir_name = os.path.join(result_dir, f'phase_{i}')
-            energy += calculate_power(dir_name)
 
-        return energy
+
+
 
 
     def process_exp_4(self, result_dir):
