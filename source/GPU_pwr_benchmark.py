@@ -426,7 +426,7 @@ class GPU_pwr_benchmark:
                         rep_store_path = os.path.join(sft_store_path, f'rep_{rep}')
                         os.makedirs(rep_store_path)
 
-                        for iter_ in range(1):
+                        for iter_ in range(32):
                             print('.', end='', flush=True)
                         
                             iter_store_path = os.path.join(rep_store_path, f'iter_{iter_}')
