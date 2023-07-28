@@ -334,7 +334,7 @@ class GPU_pwr_benchmark:
             self._log('Running experiment 1: Steady state and transient response analysis...')
 
             os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
-            for percentage in range(25, 101, 25):
+            for percentage in range(10, 101, 15):
                 print(f'  Running experiment with {percentage}% load...')
                 self._log(f'  Running experiment with {percentage}% load...')
                 # create the store path
