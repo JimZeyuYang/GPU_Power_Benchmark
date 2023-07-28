@@ -664,7 +664,7 @@ class GPU_pwr_benchmark:
                     # avg error
                     avg_err = []
                     for nv_power, pmd_power in zip(pwr_pair[0], pwr_pair[1]):
-                        avg_err.append((pmd_power - nv_power) / nv_power * 100)
+                        avg_err.append((pmd_power - nv_power) / nv_power * 100) # ?????????????????????
 
                     print(f'    {key} error gradient | intercept | raw percentage(%): {gradient:.6f} | {intercept:.4f} | {np.mean(avg_err):.4f}') 
 
@@ -1399,7 +1399,7 @@ class GPU_pwr_benchmark:
         gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
 
         for key, value in gnd_truth.items():
-            gnd_truth[key] = value * 1.15
+            gnd_truth[key] = value * 1.16
 
         tests_list = os.listdir(result_dir)
         tests_list = [test for test in tests_list if os.path.isdir(os.path.join(result_dir, test))]
@@ -1449,11 +1449,11 @@ class GPU_pwr_benchmark:
 
                     rep_result.append(num_reps)
                     std_result.append(np.std(energy_list) / gnd_truth[test] * 100)
-                    err_result.append(abs(np.mean(energy_list) - gnd_truth[test]) / gnd_truth[test] * 100)
+                    err_result.append((np.mean(energy_list) - gnd_truth[test]) / gnd_truth[test] * 100)
 
                 
-                ax[0, plot_num].plot(rep_result, std_result, color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
-                ax[1, plot_num].plot(rep_result, err_result, color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
+                ax[0, plot_num].plot(rep_result, std_result, '-o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
+                ax[1, plot_num].plot(rep_result, err_result, '-o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
             
             ax[0, plot_num].legend(loc='upper right')
             ax[1, plot_num].legend(loc='upper right')
@@ -1480,7 +1480,7 @@ class GPU_pwr_benchmark:
         power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
-        power['timestamp'] -= 25
+        # power['timestamp'] -= 25
         power.set_index('timestamp', inplace=True)
         power.sort_index(inplace=True)
 
@@ -1512,22 +1512,23 @@ class GPU_pwr_benchmark:
             energy_nvsmi += np.trapz(p, t) / 1000
 
             # plot 2 verical lines at start_ts and end_ts
-            ax.axvline(start_ts, color='g', linestyle='--')
-            ax.axvline(end_ts, color='r', linestyle='--')
+            ax.axvline(start_ts, color='g', linestyle='--', linewidth=1)
+            ax.axvline(end_ts, color='r', linestyle='--', linewidth=1)
 
 
-        ax.plot(power.index, power[power_option], label='nv_smi')
+        ax.plot(power.index, power[power_option], label='nvidia-smi Power Draw Reading', linewidth=3)
 
         ax.set_xlim(load.iloc[0].name-100, load.iloc[-1].name+100)
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Power (W)')
-        ax.set_title('Power draw from nv_smi and PMD')
+        # ax.set_title('Power draw from nv_smi and PMD')
         ax.legend(loc='upper right')
+        ax.grid(True, linestyle='--', linewidth=0.5)
 
         
-        fig.set_size_inches(15, 9)
+        fig.set_size_inches(7.5, 5)
         plt.savefig(os.path.join(result_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-        plt.savefig(os.path.join(result_dir, 'result.svg'), format='svg', bbox_inches='tight')
+        # plt.savefig(os.path.join(result_dir, 'result.eps'), format='eps', bbox_inches='tight')
         plt.close('all')
 
 
