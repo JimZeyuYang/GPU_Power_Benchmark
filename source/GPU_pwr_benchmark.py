@@ -334,7 +334,7 @@ class GPU_pwr_benchmark:
             self._log('Running experiment 1: Steady state and transient response analysis...')
 
             os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
-            for percentage in range(10, 101, 15):
+            for percentage in range(0, 101, 20):
                 print(f'  Running experiment with {percentage}% load...')
                 self._log(f'  Running experiment with {percentage}% load...')
                 # create the store path
@@ -618,7 +618,16 @@ class GPU_pwr_benchmark:
 
             intercept = coefficents[0]
             gradient = coefficents[1]
-            return intercept, gradient
+
+            y_pred = [intercept + gradient * x for x in x]
+            y_mean = np.mean(y)
+            ss_tot = sum([(y_i - y_mean)**2 for y_i in y])
+            ss_res = sum([(y_i - y_pred_i)**2 for y_i, y_pred_i in zip(y, y_pred)])
+            r_squared = 1 - (ss_res / ss_tot)
+
+            return intercept, gradient, r_squared
+
+        
 
 
         print('  Processing experiment 1...')
@@ -651,6 +660,9 @@ class GPU_pwr_benchmark:
                 rise_time = results.pop(0)
                 rise_times.append(np.mean(rise_time))
                 print(f'    {key} rise time: {np.mean(rise_time):.2f} ms')
+
+                delay_time = results.pop(0)
+                print(f'    {key} delay time: {np.mean(delay_time):.2f} ms')
         
         if self.found_PMD:
             for key, value in self.pwr_draw_options.items():
@@ -659,30 +671,34 @@ class GPU_pwr_benchmark:
                     pwr_pair = list(map(list, zip(*pwr_pair)))
 
                     # linear regression
-                    intercept, gradient = linear_regression(pwr_pair[0], pwr_pair[1])
+                    intercept, gradient, r_squared = linear_regression(pwr_pair[1], pwr_pair[0])
 
                     # avg error
                     avg_err = []
                     for nv_power, pmd_power in zip(pwr_pair[0], pwr_pair[1]):
-                        avg_err.append((pmd_power - nv_power) / nv_power * 100) # ?????????????????????
+                        avg_err.append((nv_power - pmd_power) / pmd_power * 100) # ?????????????????????
 
-                    print(f'    {key} error gradient | intercept | raw percentage(%): {gradient:.6f} | {intercept:.4f} | {np.mean(avg_err):.4f}') 
+                    print(f'    {key} error gradient|intercept|R2|raw percentage(%): {gradient:.6f}|{intercept:.4f}|{r_squared:.4f}|{np.mean(avg_err):.4f}') 
 
                     # plot the points and the linear regression line
                     fig, ax = plt.subplots(nrows=1, ncols=1)
 
-                    ax.plot(pwr_pair[0], pwr_pair[1], 'o')
-                    x = np.linspace(0, max(pwr_pair[0]), 100)
+                    ax.plot(pwr_pair[1], pwr_pair[0], '+', markersize=12, label='Steady state power draw')
+                    x = np.linspace(0, max(pwr_pair[1]), 100)
                     y = gradient * x + intercept
-                    ax.plot(x, y, '--')
-                    ax.set_xlabel('Power draw from nvidia-smi (W)')
-                    ax.set_ylabel('Power draw from PMD (W)')
-                    ax.set_title(f'{key} power draw comparison')
-                    ax.grid(True, linestyle='--', linewidth=0.5)
+                    ax.plot(x, y, ':', label=f'Line of best fit ($R^2$ = {r_squared:.4f})')
 
-                    fig.set_size_inches(8, 6)
+                    ax.set_xlim(left=0)
+                    ax.set_ylim(bottom=0)
+
+                    ax.set_xlabel('Power draw from PMD (W)')
+                    ax.set_ylabel('Power draw from nvidia-smi (W)')
+                    # ax.set_title(f'{key} power draw comparison')
+                    ax.grid(True, linestyle='--', linewidth=0.5)
+                    ax.legend(loc='lower right')
+                    fig.set_size_inches(7, 5)
                     plt.savefig(os.path.join(result_dir, f'{key}_power_draw_comparison.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-                    plt.savefig(os.path.join(result_dir, f'{key}_power_draw_comparison.svg'), format='svg', bbox_inches='tight')
+                    plt.savefig(os.path.join(result_dir, f'{key}_power_draw_comparison.eps'), format='eps', bbox_inches='tight')
                     plt.close('all')
 
         print('  Done')
@@ -729,7 +745,7 @@ class GPU_pwr_benchmark:
             return result
             # END OF THE FUNCTION
         
-        def find_rise_time(power, option):
+        def find_rise_and_delay_time(power, option):
             reduced_power = power[(power['timestamp'] < 3000) & ((power['timestamp'] > 450))].copy()
             reduced_power = reduced_power[reduced_power[option] != reduced_power[option].shift()]
             reduced_power['pwr_diff'] = reduced_power[option].diff()
@@ -760,8 +776,16 @@ class GPU_pwr_benchmark:
             else:                 start_ts = start_ts.iloc[-1]
             end_ts = reduced_power[reduced_power[option] > power_90]['timestamp'].iloc[0]
 
+            rise_time = end_ts - start_ts
 
-            return end_ts - start_ts
+            poewr_50 = power_0 + (power_100 - power_0) * 0.5
+            # ts_50_greater = reduced_power[reduced_power[option] >= poewr_50]['timestamp'].iloc[0]
+            # ts_50_smaller = reduced_power[reduced_power[option] <= poewr_50]['timestamp'].iloc[-1]
+            # ts_50 = (ts_50_greater + ts_50_smaller) / 2
+            ts_50 = reduced_power[reduced_power[option] <= poewr_50]['timestamp'].iloc[-1]
+            delay_time = ts_50 - 500
+
+            return rise_time, delay_time
 
             # END OF THE FUNCTION
         load_percentage = dir.split('/')[-2].split('%')[0]
@@ -786,7 +810,10 @@ class GPU_pwr_benchmark:
 
         results = []
         for key, value in self.pwr_draw_options.items():
-            if value:    results.append(find_rise_time(power, f' {key} [W]'))
+            if value:    
+                rise_time, delay_time = find_rise_and_delay_time(power, f' {key} [W]')
+                results.append(rise_time)
+                results.append(delay_time)
 
         # plotting
         n_rows = 2
@@ -1521,7 +1548,7 @@ class GPU_pwr_benchmark:
         ax.set_xlim(load.iloc[0].name-100, load.iloc[-1].name+100)
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Power (W)')
-        # ax.set_title('Power draw from nv_smi and PMD')
+        ax.set_title('Power draw from nv_smi and PMD')
         ax.legend(loc='upper right')
         ax.grid(True, linestyle='--', linewidth=0.5)
 

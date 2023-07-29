@@ -19,7 +19,7 @@ def main():
     model.eval()
     model = model.to(device)
 
-    bs = 2048
+    bs = 1024
     input_tensor = torch.randn(bs, 3, 224, 224).to(device)
 
     # Warmup
