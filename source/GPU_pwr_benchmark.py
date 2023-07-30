@@ -224,14 +224,16 @@ class GPU_pwr_benchmark:
         duration_list = []
         niter_list = []
 
-        while duration < 1000:
+        while duration < 10000:
             if self.verbose: print(f'    {duration:.2f} ms')
             duration = f_duration(niter, store_path)
             if duration > 2:
                 duration_list.append(duration)
                 niter_list.append(niter)
-            niter = int(niter * 2)
+            niter = int(niter * 1.5)
 
+        print(duration_list)
+        print(niter_list)
 
         # Linear regression
         intercept, gradient = linear_regression(duration_list, niter_list)
@@ -264,7 +266,7 @@ class GPU_pwr_benchmark:
         os.makedirs(store_path)
 
         niters = int(10 * self.scale_gradient + self.scale_intercept)
-        config = f'10,{niters},1000,100'
+        config = f'10,{niters},500,100'
         self._run_benchmark(1, config, store_path)
 
         df = pd.read_csv(os.path.join(store_path, 'gpudata.csv'))
