@@ -224,13 +224,13 @@ class GPU_pwr_benchmark:
         duration_list = []
         niter_list = []
 
-        while duration < 1000:
+        while duration < 10000:
             if self.verbose: print(f'    {duration:.2f} ms')
             duration = f_duration(niter, store_path)
             if duration > 2:
                 duration_list.append(duration)
                 niter_list.append(niter)
-            niter = int(niter * 2)
+            niter = int(niter * 1.5)
 
 
         # Linear regression
@@ -264,7 +264,7 @@ class GPU_pwr_benchmark:
         os.makedirs(store_path)
 
         niters = int(10 * self.scale_gradient + self.scale_intercept)
-        config = f'10,{niters},100,100'
+        config = f'10,{niters},10000,100'
         self._run_benchmark(1, config, store_path)
 
         df = pd.read_csv(os.path.join(store_path, 'gpudata.csv'))
@@ -670,13 +670,12 @@ class GPU_pwr_benchmark:
                     pwr_pair = results.pop(0)
                     pwr_pair = list(map(list, zip(*pwr_pair)))
 
-                    # linear regression
                     intercept, gradient, r_squared = linear_regression(pwr_pair[1], pwr_pair[0])
 
                     # avg error
                     avg_err = []
                     for nv_power, pmd_power in zip(pwr_pair[0], pwr_pair[1]):
-                        avg_err.append((nv_power - pmd_power) / pmd_power * 100) # ?????????????????????
+                        avg_err.append((nv_power - pmd_power) / pmd_power * 100)
 
                     print(f'    {key} error gradient|intercept|R2|raw percentage(%): {gradient:.6f}|{intercept:.4f}|{r_squared:.4f}|{np.mean(avg_err):.4f}') 
 
@@ -782,7 +781,9 @@ class GPU_pwr_benchmark:
             # ts_50_greater = reduced_power[reduced_power[option] >= poewr_50]['timestamp'].iloc[0]
             # ts_50_smaller = reduced_power[reduced_power[option] <= poewr_50]['timestamp'].iloc[-1]
             # ts_50 = (ts_50_greater + ts_50_smaller) / 2
-            ts_50 = reduced_power[reduced_power[option] <= poewr_50]['timestamp'].iloc[-1]
+            ts_50 = reduced_power[reduced_power[option] <= poewr_50]['timestamp']
+            if ts_50.empty:    ts_50 = 500
+            else:              ts_50 = ts_50.iloc[-1]
             delay_time = ts_50 - 500
 
             return rise_time, delay_time
@@ -1423,10 +1424,14 @@ class GPU_pwr_benchmark:
 
     def process_exp_3(self, result_dir):
         color_palette = {1 : '#BDCCFF', 2 : '#8D9DCE', 4 : '#5F709F', 8 : '#334771'}
-        gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
+        # A100
+        # gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
+        # for key, value in gnd_truth.items():
+        #     gnd_truth[key] = value * 1.16
+        
+        # 3090
+        gnd_truth = {'workload_0.25_pd' : 7.223707, 'workload_1_pd' : 28.436185, 'workload_8_pd' : 233.814596}
 
-        for key, value in gnd_truth.items():
-            gnd_truth[key] = value * 1.16
 
         tests_list = os.listdir(result_dir)
         tests_list = [test for test in tests_list if os.path.isdir(os.path.join(result_dir, test))]
@@ -1626,7 +1631,7 @@ class GPU_pwr_benchmark:
         start_ts = load.iloc[0].name
         end_ts = load.iloc[-1].name
 
-        power_option = ' power.draw [W]'
+        power_option = ' power.draw.instant [W]'
 
         power_window = power[(power.index >= start_ts) & (power.index <= end_ts)]
         # interpolate the lowerbound of the power data
