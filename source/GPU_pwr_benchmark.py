@@ -394,7 +394,7 @@ class GPU_pwr_benchmark:
 
             workload_length = [0.25, 1, 8]
             grains = [32, 4, 4]
-            nums = [13, 18, 10]
+            nums = [13, 34, 18]
             shifts = [1, 4, 8]
 
             for wl, grain, num in zip(workload_length, grains, nums):
