@@ -394,8 +394,8 @@ class GPU_pwr_benchmark:
             os.makedirs(os.path.join(self.result_dir, 'Experiment_3'))
 
             workload_length = [0.25, 1, 8]
-            grains = [32, 4, 4]
-            nums = [13, 34, 18]
+            grains = [32, 8, 8]
+            nums = [21, 19, 11]
             shifts = [1, 4, 8]
 
             for wl, grain, num in zip(workload_length, grains, nums):
@@ -496,7 +496,7 @@ class GPU_pwr_benchmark:
             self._log('_____________________________________________________')
             self._log('Running experiment 5: Energy measurement using Nvidia-smi...')
 
-            os.makedirs(os.path.join(self.result_dir, 'Experiment_4'))
+            os.makedirs(os.path.join(self.result_dir, 'Experiment_5'))
 
             # create a dictionary of the test name and executable command
             tests_dict = {
@@ -1665,13 +1665,7 @@ class GPU_pwr_benchmark:
         # plt.savefig(os.path.join(result_dir, 'result.eps'), format='eps', bbox_inches='tight')
         plt.close('all')
 
-
         return [energy_nvsmi / num_shifts, correct_energy / num_shifts]
-
-
-
-
-
 
 
     def process_exp_4(self, result_dir):
@@ -1705,7 +1699,6 @@ class GPU_pwr_benchmark:
             E_nvsmi_avg = np.mean(E_nvsmi_avg)
 
             print(f'  Average Energy PMD: {E_PMD_avg:.6f} J    Average Energy nv_smi: {E_nvsmi_avg:.6f} J\n')
-
 
     def _exp_4_process_single_run(self, result_dir, ratio):
         load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
@@ -1782,7 +1775,115 @@ class GPU_pwr_benchmark:
 
         return energy_PMD, energy_nvsmi
 
+    def process_exp_5(self, result_dir):
+        with open(os.path.join(result_dir, 'tests_dict.json'), 'r') as f:  tests_dict = json.load(f)
 
+        tests_list = os.listdir(result_dir)
+        tests_list.remove('tests_dict.json')
+
+        
+        for test in tests_list:
+            print(f'Processing test: {test}')
+            args = []
+            reps_list = os.listdir(os.path.join(result_dir, test))
+            reps_list.sort(key=lambda x: int(x.split('_')[-1]))
+            for reps in reps_list:
+                args.append(os.path.join(result_dir, test, reps))
+
+            naive_energy_list = []
+            correct_energy_list = []
+            for arg in args:
+                reps = int(tests_dict[test]['reps'])
+                naive_energy, correct_energy = self._exp_5_process_single_run(arg, reps)
+
+                naive_energy_list.append(naive_energy)
+                correct_energy_list.append(correct_energy)
+                print(f'  rep: {arg.split("_")[-1]}    naive energy: {naive_energy:.6f} J    correct energy: {correct_energy:.6f} J')
+            
+            naive_energy_avg = np.mean(naive_energy_list)
+            correct_energy_avg = np.mean(correct_energy_list)
+
+            print(f'  Average naive energy: {naive_energy_avg:.6f} J    Average correct energy: {correct_energy_avg:.6f} J')
+
+    def _exp_5_process_single_run(self, result_dir, num_reps):
+        load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
+        load['timestamp'] = (load['timestamp'] / 1000)
+        t0 = load['timestamp'][0]
+        load['timestamp'] -= t0
+        load.set_index('timestamp', inplace=True)
+        load.sort_index(inplace=True)
+
+        num_shifts = int(load.shape[0]/2)
+
+        # nv_smi power data
+        power = pd.read_csv(os.path.join(result_dir, 'gpudata.csv'))
+        power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
+        power['timestamp'] += 60*60*1000 * self.jet_lag
+        power['timestamp'] -= t0
+        correct_power = power.copy()
+        correct_power['timestamp'] = correct_power['timestamp'] - 100
+        power.set_index('timestamp', inplace=True)
+        power.sort_index(inplace=True)
+        correct_power.set_index('timestamp', inplace=True)
+        correct_power.sort_index(inplace=True)
+        power_option = ' power.draw.instant [W]'
+        power_option = ' power.draw [W]'
+                
+        naive_energy = 0
+        correct_energy = 0
+
+        for i in range(num_shifts):
+            start_ts = load.iloc[2*i].name
+            end_ts   = load.iloc[2*i+1].name
+
+            power_window = power[(power.index >= start_ts) & (power.index <= end_ts)]
+            # interpolate the lowerbound of the power data
+            lb_0 = power[power.index <= start_ts].iloc[-1]
+            lb_1 = power[power.index > start_ts].iloc[0]
+            gradient = (lb_1[power_option] - lb_0[power_option]) / (lb_1.name - lb_0.name)
+            lb_p = lb_0[power_option] + gradient * (start_ts - lb_0.name)
+
+            # interpolate the upperbound of the power data
+            ub_0 = power[power.index < end_ts].iloc[-1]
+            ub_1 = power[power.index >= end_ts].iloc[0]
+            gradient = (ub_1[power_option] - ub_0[power_option]) / (ub_1.name - ub_0.name)
+            ub_p = ub_0[power_option] + gradient * (end_ts - ub_0.name)
+
+            # create the power data frame
+            t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
+            p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
+            naive_energy += np.trapz(p, t) / 1000 / (num_reps / num_shifts)
+
+            ########################################################################
+            duration = (end_ts - start_ts) / (num_reps / num_shifts)
+            reps_to_ignore = math.ceil(1200 / duration)
+            if reps_to_ignore >= (num_reps / num_shifts) :
+                correct_energy += 0
+            else:
+                start_ts += reps_to_ignore * (end_ts - start_ts) / (num_reps / num_shifts)
+
+                power_window = correct_power[(correct_power.index >= start_ts) & (correct_power.index <= end_ts)]
+                # interpolate the lowerbound of the correct_power data
+                lb_0 = correct_power[correct_power.index <= start_ts].iloc[-1]
+                lb_1 = correct_power[correct_power.index > start_ts].iloc[0]
+                gradient = (lb_1[power_option] - lb_0[power_option]) / (lb_1.name - lb_0.name)
+                lb_p = lb_0[power_option] + gradient * (start_ts - lb_0.name)
+
+                # interpolate the upperbound of the correct_power data
+                ub_0 = correct_power[correct_power.index < end_ts].iloc[-1]
+                ub_1 = correct_power[correct_power.index >= end_ts].iloc[0]
+                gradient = (ub_1[power_option] - ub_0[power_option]) / (ub_1.name - ub_0.name)
+                ub_p = ub_0[power_option] + gradient * (end_ts - ub_0.name)
+
+                # create the correct_power data frame
+                t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
+                p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
+                correct_energy += np.trapz(p, t) / 1000 / (num_reps / num_shifts - reps_to_ignore)
+
+        
+
+
+        return naive_energy, correct_energy
 
 
 
