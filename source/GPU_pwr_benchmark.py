@@ -500,9 +500,9 @@ class GPU_pwr_benchmark:
 
             # create a dictionary of the test name and executable command
             tests_dict = {
-                '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},32,100'},
-                '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},8,100'},
-                '8.00_period'   : {'reps' : 20,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},4,100'},
+                '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,1'},
+                '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},50,1'},
+                '8.00_period'   : {'reps' : 20,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},20,1'},
                 'cublas_sgemm'  : {'reps' : 125,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
                 'cufft'         : {'reps' : 194,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
                 'nvJPEG'        : {'reps' : 20,    'config' : 'tests/nvJPEG/,./nvJPEG'},
@@ -520,7 +520,7 @@ class GPU_pwr_benchmark:
             for i, (test_name, value) in enumerate(tests_dict.items()):
                 print(f'  Measuring energy for test: {test_name} ', end='', flush=True)
 
-                if i < 3: exp = 1  
+                if i < 3: exp = 3
                 else    : exp = 2
 
                 # create a folder for the test
