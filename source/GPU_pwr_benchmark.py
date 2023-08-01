@@ -14,6 +14,7 @@ import struct
 from scipy.optimize import minimize
 import csv
 import json
+import math
 
 class GPU_pwr_benchmark:
     def __init__(self, sw_meas, gpu_id=0, PMD=0, verbose=False):
@@ -477,6 +478,56 @@ class GPU_pwr_benchmark:
                 os.makedirs(test_store_path)
 
                 num_repetitions = 16
+                for rep in range(num_repetitions):
+                    print('.', end='', flush=True)
+                    # create a folder for the repetition
+                    rep_store_path = os.path.join(test_store_path, f'rep_{rep}')
+                    os.makedirs(rep_store_path)
+
+                    if rep == 0:  self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
+                    self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
+                    time.sleep(random.random())
+
+                print(' Done!')
+
+        elif experiment == 5:
+            print('_____________________________________________________')
+            print('Running experiment 5: Energy measurement using Nvidia-smi...')
+            self._log('_____________________________________________________')
+            self._log('Running experiment 5: Energy measurement using Nvidia-smi...')
+
+            os.makedirs(os.path.join(self.result_dir, 'Experiment_4'))
+
+            # create a dictionary of the test name and executable command
+            tests_dict = {
+                '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},32,100'},
+                '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},8,100'},
+                '8.00_period'   : {'reps' : 20,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},4,100'},
+                'cublas_sgemm'  : {'reps' : 125,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
+                'cufft'         : {'reps' : 194,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
+                'nvJPEG'        : {'reps' : 20,    'config' : 'tests/nvJPEG/,./nvJPEG'},
+                'quasi_rnd_gen' : {'reps' : 10184, 'config' : 'tests/quasirandomGenerator/,./quasirandomGenerator'},
+                'stereo_disp'   : {'reps' : 426,   'config' : 'tests/stereoDisparity/,./stereoDisparity'},
+                'black_scholes' : {'reps' : 2110,  'config' : 'tests/BlackScholes/,./BlackScholes'},
+                'resnet_50'     : {'reps' : 20,    'config' : 'tests/MLPerf/,./resnet50.py'},
+                'retina_net'    : {'reps' : 20,    'config' : 'tests/MLPerf/,./retinanet.py'},
+                'bert'          : {'reps' : 20,    'config' : 'tests/MLPerf/,./bert.py'},
+            }
+
+            with open(os.path.join(self.result_dir, 'Experiment_4', 'tests_dict.json'), 'w') as f: json.dump(tests_dict, f)
+
+            # enum through the tests with the enumerae function
+            for i, (test_name, value) in enumerate(tests_dict.items()):
+                print(f'  Measuring energy for test: {test_name} ', end='', flush=True)
+
+                if i < 3: exp = 1  
+                else    : exp = 2
+
+                # create a folder for the test
+                test_store_path = os.path.join(self.result_dir, 'Experiment_4', test_name)
+                os.makedirs(test_store_path)
+
+                num_repetitions = 4
                 for rep in range(num_repetitions):
                     print('.', end='', flush=True)
                     # create a folder for the repetition
@@ -1422,14 +1473,18 @@ class GPU_pwr_benchmark:
 
 
     def process_exp_3(self, result_dir):
-        color_palette = {1 : '#BDCCFF', 2 : '#8D9DCE', 4 : '#5F709F', 8 : '#334771'}
+        color_palette =   {1 : '#BDCCFF', 4 : '#8D9DCE', 8 : '#5F709F'}
+        correct_palette = {1 : '#91c732', 4 : '#76b900', 8 : '#5e9400'}
         # A100
         # gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
         # for key, value in gnd_truth.items():
         #     gnd_truth[key] = value * 1.16
         
         # 3090
-        gnd_truth = {'workload_0.25_pd' : 7.223707, 'workload_1_pd' : 28.436185, 'workload_8_pd' : 233.814596}
+
+        if self.gpu_name == 'NVIDIA_GeForce_RTX_3090':
+            gnd_truth = {'workload_0.25_pd' : 7.861696, 'workload_1_pd' : 30.446554, 'workload_8_pd' : 238.511096}
+
 
 
         tests_list = os.listdir(result_dir)
@@ -1462,6 +1517,10 @@ class GPU_pwr_benchmark:
                 rep_result =  []
                 std_result = []
                 err_result = []
+                correct_rep_result = []
+                correct_std_result = []
+                correct_err_result = []
+
                 for reps in reps_list:
                     print(f'    Processing reps: {reps}')
                     num_reps = int(reps.split('_')[-1])
@@ -1470,24 +1529,34 @@ class GPU_pwr_benchmark:
                     iters_list.sort(key=lambda x: int(x.split('_')[-1]))
 
                     iters_dir = [os.path.join(result_dir, test, shift, reps, iters) for iters in iters_list]
-                    
-                    # iters_dir = iters_dir[0:1]
+
 
                     num_processes = min(len(iters_dir), os.cpu_count())
                     pool = Pool(num_processes)
-                    energy_list = pool.map(self._exp_3_calculate_power, iters_dir)
-                    energy_list = [energy / num_reps for energy in energy_list]
+                    results = pool.map(self._exp_3_calculate_power, iters_dir)
+                    results = list(map(list, zip(*results)))
+                    energy_list = results[0]
+                    correct_list = results[1]
 
                     rep_result.append(num_reps)
                     std_result.append(np.std(energy_list) / gnd_truth[test] * 100)
                     err_result.append((np.mean(energy_list) - gnd_truth[test]) / gnd_truth[test] * 100)
 
+                    if np.mean(correct_list) > 0:
+                        correct_rep_result.append(num_reps)
+                        correct_std_result.append(np.std(correct_list) / gnd_truth[test] * 100)
+                        correct_err_result.append((np.mean(correct_list) - gnd_truth[test]) / gnd_truth[test] * 100)
+
                 
-                ax[0, plot_num].plot(rep_result, std_result, '-o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
-                ax[1, plot_num].plot(rep_result, err_result, '-o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
-            
+                ax[0, plot_num].plot(rep_result, std_result, '--o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
+                ax[1, plot_num].plot(rep_result, err_result, '--o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
+
+                ax[0, plot_num].plot(correct_rep_result, correct_std_result, '-o', color=correct_palette[num_shift], linewidth=2, label=f'{num_shift} shifts (Corrected)')
+                ax[1, plot_num].plot(correct_rep_result, correct_err_result, '-o', color=correct_palette[num_shift], linewidth=2, label=f'{num_shift} shifts (Corrected)')
+
+
             ax[0, plot_num].legend(loc='upper right')
-            ax[1, plot_num].legend(loc='upper right')
+            ax[1, plot_num].legend(loc='lower right')
 
         fig.set_size_inches(20, 10)
         plt.savefig(os.path.join(result_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
@@ -1496,8 +1565,12 @@ class GPU_pwr_benchmark:
             
             
     def _exp_3_calculate_power(self, result_dir):
+        duration = float(result_dir.split('/')[-4].split('_')[-2]) * 100
         num_shifts = int(result_dir.split('/')[-3].split('_')[-1])
+        num_reps = int(result_dir.split('/')[-2].split('_')[-1])
 
+        power_option = ' power.draw.instant [W]'
+        power_option = ' power.draw [W]'
 
         load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
         load['timestamp'] = (load['timestamp'] / 1000)
@@ -1511,12 +1584,15 @@ class GPU_pwr_benchmark:
         power['timestamp'] = (pd.to_datetime(power['timestamp']) - pd.Timestamp("1970-01-01")) // pd.Timedelta("1ms")
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
-        # power['timestamp'] -= 25
+        correct_power = power.copy()
+        correct_power['timestamp'] = correct_power['timestamp'] - 100
         power.set_index('timestamp', inplace=True)
         power.sort_index(inplace=True)
+        correct_power.set_index('timestamp', inplace=True)
+        correct_power.sort_index(inplace=True)
 
-        power_option = ' power.draw.instant [W]'
         energy_nvsmi = 0
+        correct_energy = 0
 
         fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
@@ -1540,11 +1616,36 @@ class GPU_pwr_benchmark:
             # create the power data frame
             t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
             p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
-            energy_nvsmi += np.trapz(p, t) / 1000
+            energy_nvsmi += np.trapz(p, t) / 1000 / (num_reps / num_shifts)
 
             # plot 2 verical lines at start_ts and end_ts
             ax.axvline(start_ts, color='g', linestyle='--', linewidth=1)
             ax.axvline(end_ts, color='r', linestyle='--', linewidth=1)
+
+            ########################################################################
+            reps_to_ignore = math.ceil(1200 / duration)
+            if reps_to_ignore >= (num_reps / num_shifts) :
+                correct_energy += 0
+            else:
+                start_ts += reps_to_ignore * (end_ts - start_ts) / (num_reps / num_shifts)
+
+                power_window = correct_power[(correct_power.index >= start_ts) & (correct_power.index <= end_ts)]
+                # interpolate the lowerbound of the correct_power data
+                lb_0 = correct_power[correct_power.index <= start_ts].iloc[-1]
+                lb_1 = correct_power[correct_power.index > start_ts].iloc[0]
+                gradient = (lb_1[power_option] - lb_0[power_option]) / (lb_1.name - lb_0.name)
+                lb_p = lb_0[power_option] + gradient * (start_ts - lb_0.name)
+
+                # interpolate the upperbound of the correct_power data
+                ub_0 = correct_power[correct_power.index < end_ts].iloc[-1]
+                ub_1 = correct_power[correct_power.index >= end_ts].iloc[0]
+                gradient = (ub_1[power_option] - ub_0[power_option]) / (ub_1.name - ub_0.name)
+                ub_p = ub_0[power_option] + gradient * (end_ts - ub_0.name)
+
+                # create the correct_power data frame
+                t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
+                p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
+                correct_energy += np.trapz(p, t) / 1000 / (num_reps / num_shifts - reps_to_ignore)
 
 
         ax.plot(power.index, power[power_option], label='nvidia-smi Power Draw Reading', linewidth=3)
@@ -1563,7 +1664,7 @@ class GPU_pwr_benchmark:
         plt.close('all')
 
 
-        return energy_nvsmi
+        return [energy_nvsmi / num_shifts, correct_energy / num_shifts]
 
 
 
@@ -1589,9 +1690,11 @@ class GPU_pwr_benchmark:
             E_PMD_avg = []
             E_nvsmi_avg = []
             for arg in args:
-                E_PMD, E_nvsmi = self._exp_4_process_single_run(arg)
-                E_PMD /= tests_dict[test]['reps']
-                E_nvsmi /= tests_dict[test]['reps']
+                reps = int(tests_dict[test]['reps'] * 0.6)
+                ratio = reps / tests_dict[test]['reps']
+                E_PMD, E_nvsmi = self._exp_4_process_single_run(arg, ratio)
+                E_PMD /= reps
+                E_nvsmi /= reps
                 E_PMD_avg.append(E_PMD)
                 E_nvsmi_avg.append(E_nvsmi)
                 print(f'  rep: {arg.split("_")[-1]}    Energy PMD: {E_PMD:.6f} J    Energy nv_smi: {E_nvsmi:.6f} J')
@@ -1605,7 +1708,7 @@ class GPU_pwr_benchmark:
             print(f'  Average Energy PMD: {E_PMD_avg:.6f} J    Average Energy nv_smi: {E_nvsmi_avg:.6f} J\n')
 
 
-    def _exp_4_process_single_run(self, result_dir):
+    def _exp_4_process_single_run(self, result_dir, ratio):
         load = pd.read_csv(os.path.join(result_dir, 'timestamps.csv'))
         load['timestamp'] = (load['timestamp'] / 1000)
         t0 = load['timestamp'][0]
@@ -1629,6 +1732,8 @@ class GPU_pwr_benchmark:
     
         start_ts = load.iloc[0].name
         end_ts = load.iloc[-1].name
+        start_ts += (1 - ratio) * (end_ts - start_ts)
+
 
         power_option = ' power.draw.instant [W]'
 

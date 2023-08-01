@@ -43,10 +43,11 @@ def steam_gpu_share():
 
 def steady_state_accuracy():
     GPUs = [
+        "GeForce RTX 3090 #1", "GeForce RTX 3090 #2", "GeForce RTX 3090 #3", "GeForce RTX 3090 #4", "GeForce RTX 3090 #5",
         "GeForce RTX 4090",
-        "GeForce RTX 3090", "GeForce RTX 3070 Ti",
+        "GeForce RTX 3070 Ti",
         "GeForce RTX 2080 Ti", "GeForce RTX 2060 SUPER",
-        "GeForce RTX 1080 Ti", "GeForce RTX 1080",
+        "GeForce GTX TITAN X Pascal", "GeForce RTX 1080 Ti", "GeForce RTX 1080",
         "GeForce GTX TITAN X",
         "Quadro RTX A5000",
         "Tesla A100 PCIE 40GB", "Tesla P100 PCIE 16GB", "Tesla M40", "Tesla K80", "Tesla K40m",
@@ -54,20 +55,22 @@ def steady_state_accuracy():
 
     Data = {
         'Offset': (
+                    3.468566667, -1.6615, 3.9206, -5.0714, -8.5276,
                     -12.354,
-                    3.468566667, -4.801566667,
+                    -4.801566667,
                     -5.7953, 11.8485,
-                    -0.334266667, -5.155333333,
+                    2.5377, -0.334266667, -5.155333333,
                     1.2307,
                     8.764,
                     -1.210333333, 0.883166667, 1.4497, -6.2932, 0.8057,
                      ),
 
         'Gradient':  (
+                    -5.493, -0.6464, -1.772, 1.4763, 1.7246,
                     4.450333333,
-                    -5.493, 0.393966667,
+                    0.393966667,
                     -3.3428, -1.303366667,
-                    -0.122033333, 6.363033333,
+                    -2.5911, -0.122033333, 6.363033333,
                     1.057666667,
                     -9.4997,
                     -4.582566667, -0.722133333, -2.874166667, -3.6307, 2.4105,
@@ -108,7 +111,7 @@ def steady_state_accuracy():
     handles, labels = plt.gca().get_legend_handles_labels()
     handles = handles[::-1]
     labels = labels[::-1]
-    plt.legend(handles, labels, loc='upper right')
+    plt.legend(handles, labels, loc='lower left')
 
     ax2 = ax.twiny()
     ax2.set_xlim(ax.get_xlim())
@@ -118,7 +121,7 @@ def steady_state_accuracy():
     ax2.spines['top'].set_color(colors['Gradient'])
     ax2.spines['bottom'].set_color(colors['Offset'])
 
-    fig.set_size_inches(6, 8)
+    fig.set_size_inches(6, 9)
     plt.savefig('steady_state_accuracy.jpg', format='jpg', dpi=512, bbox_inches='tight')
     plt.savefig('steady_state_accuracy.eps', format='eps', bbox_inches='tight')
     plt.close()
