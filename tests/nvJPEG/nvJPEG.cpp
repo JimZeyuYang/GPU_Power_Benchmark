@@ -44,6 +44,8 @@ int host_free(void* p) { return (int)cudaFreeHost(p); }
 typedef std::vector<std::string> FileNames;
 typedef std::vector<std::vector<char> > FileData;
 
+#define REPEAT (20)
+
 struct decode_params_t {
   std::string input_dir;
   int batch_size;
@@ -494,7 +496,7 @@ int main(int argc, const char *argv[]) {
     params.batch_size = std::atoi(argv[pidx + 1]);
   }
 
-  params.total_images = 4096;
+  params.total_images = 512 * REPEAT;
   if ((pidx = findParamIndex(argv, argc, "-t")) != -1) {
     params.total_images = std::atoi(argv[pidx + 1]);
   }

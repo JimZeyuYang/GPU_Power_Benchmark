@@ -6,7 +6,7 @@ import torch
 from torchvision.models.detection import retinanet_resnet50_fpn, RetinaNet_ResNet50_FPN_Weights
 
 def main():
-    REPEAT = 16
+    REPEAT = 20
 
     torch.hub.set_dir('.')
 

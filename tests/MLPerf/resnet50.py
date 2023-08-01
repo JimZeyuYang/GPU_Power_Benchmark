@@ -6,7 +6,7 @@ import torch
 import torchvision.models as models
 
 def main():
-    REPEAT = 4
+    REPEAT = 20
 
     torch.hub.set_dir('.')
 

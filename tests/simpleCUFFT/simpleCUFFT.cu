@@ -45,7 +45,7 @@
 typedef float2 Complex;
 
 #define SIGNAL_SIZE 300000000
-#define REPEAT (32)
+#define REPEAT (194)
 
 int main(int argc, char **argv) { 
   findCudaDevice(argc, (const char **)argv); 

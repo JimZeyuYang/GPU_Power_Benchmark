@@ -9,7 +9,7 @@ from faker import Faker
 import warnings
 
 def main():
-    REPEAT = 8
+    REPEAT = 20
 
     warnings.filterwarnings('ignore')
 

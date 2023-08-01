@@ -586,6 +586,8 @@ class GPU_pwr_benchmark:
             if 'Experiment_3' in dir_list:  self.process_exp_3(os.path.join(self.result_dir, 'Experiment_3'))
         if exp == 'all' or exp == 4:
             if 'Experiment_4' in dir_list:  self.process_exp_4(os.path.join(self.result_dir, 'Experiment_4'))
+        if exp == 'all' or exp == 5:
+            if 'Experiment_5' in dir_list:  self.process_exp_5(os.path.join(self.result_dir, 'Experiment_5'))
 
         return continue_
 
@@ -1698,9 +1700,6 @@ class GPU_pwr_benchmark:
                 E_PMD_avg.append(E_PMD)
                 E_nvsmi_avg.append(E_nvsmi)
                 print(f'  rep: {arg.split("_")[-1]}    Energy PMD: {E_PMD:.6f} J    Energy nv_smi: {E_nvsmi:.6f} J')
-
-            #     break
-            # break
             
             E_PMD_avg = np.mean(E_PMD_avg)
             E_nvsmi_avg = np.mean(E_nvsmi_avg)
@@ -1782,6 +1781,7 @@ class GPU_pwr_benchmark:
         plt.close('all')
 
         return energy_PMD, energy_nvsmi
+
 
 
 

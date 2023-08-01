@@ -58,7 +58,7 @@ extern "C" void inverseCNDgpu(float *d_Output, unsigned int *d_Input,
                               unsigned int N);
 
 const int N = 10485760;
-#define REPEAT 1000
+#define REPEAT 10184
 
 int main(int argc, char **argv) {
   // Start logs

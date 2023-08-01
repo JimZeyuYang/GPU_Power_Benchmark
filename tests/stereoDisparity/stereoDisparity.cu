@@ -47,7 +47,7 @@
 #include <helper_string.h>  // helper functions for string parsing
 
 static const char *sSDKsample = "[stereoDisparity]\0";
-#define REPEAT (64)
+#define REPEAT (426)
 
 
 int iDivUp(int a, int b) { return ((a % b) != 0) ? (a / b + 1) : (a / b); }
