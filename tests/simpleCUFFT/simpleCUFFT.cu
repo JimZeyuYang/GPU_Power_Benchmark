@@ -83,6 +83,8 @@ int main(int argc, char **argv) {
     for (int j = 0; j < REPEAT/SHIFTS; j++) cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal), reinterpret_cast<cufftComplex *>(d_signal), CUFFT_FORWARD);
     cudaDeviceSynchronize();
     time_array[i*2+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    // sleep for 25 milliseconds
+    usleep(25*1000);
   }
 
 

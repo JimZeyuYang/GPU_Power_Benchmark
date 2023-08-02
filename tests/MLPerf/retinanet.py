@@ -37,6 +37,8 @@ def main():
                 model(input_tensor)
             torch.cuda.synchronize()
             end_ts.append(int(time.time() * 1_000_000))
+            # sleep for 25 miliseconds
+            time.sleep(0.025)
 
 
 

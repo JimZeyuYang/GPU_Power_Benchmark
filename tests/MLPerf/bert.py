@@ -73,6 +73,8 @@ def main():
                 model(input_ids, attention_mask=attention_masks)
             torch.cuda.synchronize()
             end_ts.append(int(time.time() * 1_000_000))
+            # sleep for 25 miliseconds
+            time.sleep(0.025)
 
     # Store timestamps in a file
     with open("timestamps.csv", "w") as f:
