@@ -502,16 +502,16 @@ class GPU_pwr_benchmark:
             tests_dict = {
                 '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,8'},
                 '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},50,8'},
-                '8.00_period'   : {'reps' : 20,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},20,8'},
+                '8.00_period'   : {'reps' : 32,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},20,8'},
                 'cublas_sgemm'  : {'reps' : 88,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
                 'cufft'         : {'reps' : 304,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
                 'nvJPEG'        : {'reps' : 40,    'config' : 'tests/nvJPEG/,./nvJPEG'},
                 'quasi_rnd_gen' : {'reps' : 7304, 'config' : 'tests/quasirandomGenerator/,./quasirandomGenerator'},
                 'stereo_disp'   : {'reps' : 640,   'config' : 'tests/stereoDisparity/,./stereoDisparity'},
                 'black_scholes' : {'reps' : 3480,  'config' : 'tests/BlackScholes/,./BlackScholes'},
-                'resnet_50'     : {'reps' : 24,    'config' : 'tests/MLPerf/,./resnet50.py'},
-                'retina_net'    : {'reps' : 24,    'config' : 'tests/MLPerf/,./retinanet.py'},
-                'bert'          : {'reps' : 24,    'config' : 'tests/MLPerf/,./bert.py'},
+                'resnet_50'     : {'reps' : 32,    'config' : 'tests/MLPerf/,./resnet50.py'},
+                'retina_net'    : {'reps' : 32,    'config' : 'tests/MLPerf/,./retinanet.py'},
+                'bert'          : {'reps' : 32,    'config' : 'tests/MLPerf/,./bert.py'},
             }
 
             with open(os.path.join(self.result_dir, 'Experiment_5', 'tests_dict.json'), 'w') as f: json.dump(tests_dict, f)

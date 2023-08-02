@@ -20,7 +20,7 @@ def main():
     model.eval()
     model = model.to(device)
 
-    bs = 1024
+    bs = 2048
     input_tensor = torch.randn(bs, 3, 224, 224).to(device)
 
     start_ts = []
