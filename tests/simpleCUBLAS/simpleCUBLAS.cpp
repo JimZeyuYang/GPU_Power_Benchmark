@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <chrono>
+#include <unistd.h>
 
 /* Includes, cuda */
 #include <cublas_v2.h>

@@ -32,7 +32,7 @@
 #include <cuda_runtime_api.h>
 #include "helper_nvJPEG.hxx"
 #include <chrono>
-
+#include <unistd.h>
 int dev_malloc(void **p, size_t s) { return (int)cudaMalloc(p, s); }
 
 int dev_free(void *p) { return (int)cudaFree(p); }

@@ -35,7 +35,7 @@
 #include <string.h>
 #include <math.h>
 #include <chrono>
-
+#include <unistd.h>
 
 // includes, kernels
 #include <cuda_runtime.h>
