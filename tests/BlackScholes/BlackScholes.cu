@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < SHIFTS; i++) {
     time_array[i*2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    for (j = 0; j < REPEAT/SHIFTS; j++) {
+    for (int j = 0; j < REPEAT/SHIFTS; j++) {
       BlackScholesGPU<<<DIV_UP((OPT_N / 2), 128), 128 /*480, 128*/>>>(
           (float2 *)d_CallResult, (float2 *)d_PutResult, (float2 *)d_StockPrice,
           (float2 *)d_OptionStrike, (float2 *)d_OptionYears, RISKFREE, VOLATILITY,
