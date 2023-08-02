@@ -524,7 +524,7 @@ class GPU_pwr_benchmark:
                 else    : exp = 2
 
                 # create a folder for the test
-                test_store_path = os.path.join(self.result_dir, 'Experiment_4', test_name)
+                test_store_path = os.path.join(self.result_dir, 'Experiment_5', test_name)
                 os.makedirs(test_store_path)
 
                 num_repetitions = 4
@@ -1819,7 +1819,7 @@ class GPU_pwr_benchmark:
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         correct_power = power.copy()
-        correct_power['timestamp'] = correct_power['timestamp'] - 100
+        correct_power['timestamp'] = correct_power['timestamp']
         power.set_index('timestamp', inplace=True)
         power.sort_index(inplace=True)
         correct_power.set_index('timestamp', inplace=True)
@@ -1854,7 +1854,7 @@ class GPU_pwr_benchmark:
 
             ########################################################################
             duration = (end_ts - start_ts) / (num_reps / num_shifts)
-            reps_to_ignore = math.ceil(1200 / duration)
+            reps_to_ignore = math.ceil(100 / duration)
             if reps_to_ignore >= (num_reps / num_shifts) :
                 correct_energy += 0
             else:
@@ -1881,7 +1881,7 @@ class GPU_pwr_benchmark:
         
 
 
-        return naive_energy, correct_energy
+        return naive_energy / num_shifts, correct_energy / num_shifts
 
 
 
