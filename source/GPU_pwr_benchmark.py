@@ -501,8 +501,8 @@ class GPU_pwr_benchmark:
             # create a dictionary of the test name and executable command
             tests_dict = {
                 '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,8'},
-                '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},50,8'},
-                '8.00_period'   : {'reps' : 32,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},20,8'},
+                '1.00_period'   : {'reps' : 56,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},56,8'},
+                '8.00_period'   : {'reps' : 32,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},32,8'},
                 'cublas_sgemm'  : {'reps' : 88,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
                 'cufft'         : {'reps' : 304,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
                 'nvJPEG'        : {'reps' : 40,    'config' : 'tests/nvJPEG/,./nvJPEG'},
