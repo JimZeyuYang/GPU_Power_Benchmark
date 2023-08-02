@@ -7,7 +7,7 @@ import torchvision.models as models
 
 def main():
     REPEAT = 32
-    SHIFTS = 8
+    SHIFTS = 1
 
     torch.hub.set_dir('.')
 

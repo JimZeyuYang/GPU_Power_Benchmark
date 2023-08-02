@@ -46,7 +46,7 @@
 /* Matrix size */
 #define N (8192)
 #define REPEAT (88)
-#define SHIFTS (8)
+#define SHIFTS (1)
 
 /* Main */
 int main(int argc, char **argv) {

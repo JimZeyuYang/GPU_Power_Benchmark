@@ -59,7 +59,7 @@ extern "C" void inverseCNDgpu(float *d_Output, unsigned int *d_Input,
 
 const int N = 10485760;
 #define REPEAT 7304
-#define SHIFTS 8
+#define SHIFTS 1
 
 int main(int argc, char **argv) {
   // Start logs

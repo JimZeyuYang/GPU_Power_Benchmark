@@ -45,7 +45,7 @@ typedef std::vector<std::string> FileNames;
 typedef std::vector<std::vector<char> > FileData;
 
 #define REPEAT (40)
-#define SHIFTS (8)
+#define SHIFTS (1)
 
 
 struct decode_params_t {

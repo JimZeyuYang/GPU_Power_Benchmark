@@ -10,7 +10,7 @@ import warnings
 
 def main():
     REPEAT = 32
-    SHIFTS = 8
+    SHIFTS = 1
 
     warnings.filterwarnings('ignore')
 

@@ -62,7 +62,7 @@ float RandFloat(float low, float high) {
 ////////////////////////////////////////////////////////////////////////////////
 const int OPT_N = 100000000;
 const int REPEAT = 3480;
-const int SHIFTS = 8;
+const int SHIFTS = 1;
 
 const int OPT_SZ = OPT_N * sizeof(float);
 const float RISKFREE = 0.02f;

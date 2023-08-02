@@ -7,7 +7,7 @@ from torchvision.models.detection import retinanet_resnet50_fpn, RetinaNet_ResNe
 
 def main():
     REPEAT = 32
-    SHIFTS = 8
+    SHIFTS = 1
 
     torch.hub.set_dir('.')
 

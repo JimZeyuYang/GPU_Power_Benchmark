@@ -48,7 +48,7 @@
 
 static const char *sSDKsample = "[stereoDisparity]\0";
 #define REPEAT (640)
-#define SHIFTS (8)
+#define SHIFTS (1)
 
 
 int iDivUp(int a, int b) { return ((a % b) != 0) ? (a / b + 1) : (a / b); }
