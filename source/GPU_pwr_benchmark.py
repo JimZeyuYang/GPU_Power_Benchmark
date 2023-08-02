@@ -514,7 +514,7 @@ class GPU_pwr_benchmark:
                 'bert'          : {'reps' : 24,    'config' : 'tests/MLPerf/,./bert.py'},
             }
 
-            with open(os.path.join(self.result_dir, 'Experiment_4', 'tests_dict.json'), 'w') as f: json.dump(tests_dict, f)
+            with open(os.path.join(self.result_dir, 'Experiment_5', 'tests_dict.json'), 'w') as f: json.dump(tests_dict, f)
 
             # enum through the tests with the enumerae function
             for i, (test_name, value) in enumerate(tests_dict.items()):
