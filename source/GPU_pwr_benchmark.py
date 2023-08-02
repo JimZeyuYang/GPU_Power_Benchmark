@@ -500,18 +500,18 @@ class GPU_pwr_benchmark:
 
             # create a dictionary of the test name and executable command
             tests_dict = {
-                '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,1'},
-                '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},50,1'},
-                '8.00_period'   : {'reps' : 20,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},20,1'},
-                'cublas_sgemm'  : {'reps' : 125,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
-                'cufft'         : {'reps' : 194,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
-                'nvJPEG'        : {'reps' : 20,    'config' : 'tests/nvJPEG/,./nvJPEG'},
-                'quasi_rnd_gen' : {'reps' : 10184, 'config' : 'tests/quasirandomGenerator/,./quasirandomGenerator'},
-                'stereo_disp'   : {'reps' : 426,   'config' : 'tests/stereoDisparity/,./stereoDisparity'},
-                'black_scholes' : {'reps' : 2110,  'config' : 'tests/BlackScholes/,./BlackScholes'},
-                'resnet_50'     : {'reps' : 20,    'config' : 'tests/MLPerf/,./resnet50.py'},
-                'retina_net'    : {'reps' : 20,    'config' : 'tests/MLPerf/,./retinanet.py'},
-                'bert'          : {'reps' : 20,    'config' : 'tests/MLPerf/,./bert.py'},
+                '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,8'},
+                '1.00_period'   : {'reps' : 50,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},50,8'},
+                '8.00_period'   : {'reps' : 20,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},20,8'},
+                'cublas_sgemm'  : {'reps' : 88,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
+                'cufft'         : {'reps' : 304,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
+                'nvJPEG'        : {'reps' : 40,    'config' : 'tests/nvJPEG/,./nvJPEG'},
+                'quasi_rnd_gen' : {'reps' : 7304, 'config' : 'tests/quasirandomGenerator/,./quasirandomGenerator'},
+                'stereo_disp'   : {'reps' : 640,   'config' : 'tests/stereoDisparity/,./stereoDisparity'},
+                'black_scholes' : {'reps' : 3480,  'config' : 'tests/BlackScholes/,./BlackScholes'},
+                'resnet_50'     : {'reps' : 24,    'config' : 'tests/MLPerf/,./resnet50.py'},
+                'retina_net'    : {'reps' : 24,    'config' : 'tests/MLPerf/,./retinanet.py'},
+                'bert'          : {'reps' : 24,    'config' : 'tests/MLPerf/,./bert.py'},
             }
 
             with open(os.path.join(self.result_dir, 'Experiment_4', 'tests_dict.json'), 'w') as f: json.dump(tests_dict, f)
@@ -1476,17 +1476,15 @@ class GPU_pwr_benchmark:
 
     def process_exp_3(self, result_dir):
         color_palette =   {1 : '#BDCCFF', 4 : '#8D9DCE', 8 : '#5F709F'}
-        correct_palette = {1 : '#91c732', 4 : '#76b900', 8 : '#5e9400'}
-        # A100
-        # gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
-        # for key, value in gnd_truth.items():
-        #     gnd_truth[key] = value * 1.16
-        
-        # 3090
+        correct_palette = {1 : '#acd566', 4 : '#76b900', 8 : '#466f00'}
+
 
         if self.gpu_name == 'NVIDIA_GeForce_RTX_3090':
             gnd_truth = {'workload_0.25_pd' : 7.861696, 'workload_1_pd' : 30.446554, 'workload_8_pd' : 238.511096}
-
+        elif self.gpu_name == 'NVIDIA_A100-PCIE-40GB':
+            gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
+            for key, value in gnd_truth.items():
+                gnd_truth[key] = value * 1.16
 
 
         tests_list = os.listdir(result_dir)
@@ -1587,7 +1585,7 @@ class GPU_pwr_benchmark:
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         correct_power = power.copy()
-        correct_power['timestamp'] = correct_power['timestamp'] - 100
+        correct_power['timestamp'] = correct_power['timestamp']
         power.set_index('timestamp', inplace=True)
         power.sort_index(inplace=True)
         correct_power.set_index('timestamp', inplace=True)
@@ -1625,7 +1623,7 @@ class GPU_pwr_benchmark:
             ax.axvline(end_ts, color='r', linestyle='--', linewidth=1)
 
             ########################################################################
-            reps_to_ignore = math.ceil(1200 / duration)
+            reps_to_ignore = math.ceil(200 / duration)
             if reps_to_ignore >= (num_reps / num_shifts) :
                 correct_energy += 0
             else:

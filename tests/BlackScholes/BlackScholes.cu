@@ -61,7 +61,8 @@ float RandFloat(float low, float high) {
 // Data configuration
 ////////////////////////////////////////////////////////////////////////////////
 const int OPT_N = 100000000;
-const int NUM_ITERATIONS = 2110;
+const int REPEAT = 3480;
+const int SHIFTS = 8;
 
 const int OPT_SZ = OPT_N * sizeof(float);
 const float RISKFREE = 0.02f;
@@ -151,116 +152,40 @@ int main(int argc, char **argv) {
     getLastCudaError("BlackScholesGPU() execution failed\n");
   }
   checkCudaErrors(cudaDeviceSynchronize());
-  sdkResetTimer(&hTimer);
-  sdkStartTimer(&hTimer);
-
-  uint64_t start_ts, end_ts;
-  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
 
-  for (i = 0; i < NUM_ITERATIONS; i++) {
-    BlackScholesGPU<<<DIV_UP((OPT_N / 2), 128), 128 /*480, 128*/>>>(
-        (float2 *)d_CallResult, (float2 *)d_PutResult, (float2 *)d_StockPrice,
-        (float2 *)d_OptionStrike, (float2 *)d_OptionYears, RISKFREE, VOLATILITY,
-        OPT_N);
-    getLastCudaError("BlackScholesGPU() execution failed\n");
+
+
+  uint64_t time_array[SHIFTS*2];
+
+  for (int i = 0; i < SHIFTS; i++) {
+    time_array[i*2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    for (j = 0; j < REPEAT/SHIFTS; j++) {
+      BlackScholesGPU<<<DIV_UP((OPT_N / 2), 128), 128 /*480, 128*/>>>(
+          (float2 *)d_CallResult, (float2 *)d_PutResult, (float2 *)d_StockPrice,
+          (float2 *)d_OptionStrike, (float2 *)d_OptionYears, RISKFREE, VOLATILITY,
+          OPT_N);
+      getLastCudaError("BlackScholesGPU() execution failed\n");
+    }
+    cudaDeviceSynchronize();
+    time_array[i*2+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   }
-  checkCudaErrors(cudaDeviceSynchronize());
 
-
-  cudaDeviceSynchronize();
-  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
   // Write the timestamps to a file
   std::ofstream outfile;
   outfile.open("timestamps.csv");
   outfile << "timestamp" << std::endl;
-  outfile << start_ts << std::endl;
-  outfile << end_ts << std::endl;
+  for (int i = 0; i < SHIFTS*2; i++) {
+    outfile << time_array[i] << std::endl;
+  }
   outfile.close();
 
   // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / NUM_ITERATIONS);
   // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
 
-  sdkStopTimer(&hTimer);
-  gpuTime = sdkGetTimerValue(&hTimer);
 
 
-  // Both call and put is calculated
-  // printf("Options count             : %i     \n", 2 * OPT_N);
-  // printf("BlackScholesGPU() time    : %f msec\n", gpuTime);
-  // printf("Effective memory bandwidth: %f GB/s\n",
-  //        ((double)(5 * OPT_N * sizeof(float)) * 1E-9) / (gpuTime * 1E-3));
-  // printf("Gigaoptions per second    : %f     \n\n",
-  //        ((double)(2 * OPT_N) * 1E-9) / (gpuTime * 1E-3));
-
-  // printf(
-  //     "BlackScholes, Throughput = %.4f GOptions/s, Time = %.5f s, Size = %u "
-  //     "options, NumDevsUsed = %u, Workgroup = %u\n",
-  //     (((double)(2.0 * OPT_N) * 1.0E-9) / (gpuTime * 1.0E-3)), gpuTime * 1e-3,
-  //     (2 * OPT_N), 1, 128);
-
-  // printf("\nReading back GPU results...\n");
-  // Read back GPU results to compare them to CPU results
-  // checkCudaErrors(cudaMemcpy(h_CallResultGPU, d_CallResult, OPT_SZ,
-  //                            cudaMemcpyDeviceToHost));
-  // checkCudaErrors(
-  //     cudaMemcpy(h_PutResultGPU, d_PutResult, OPT_SZ, cudaMemcpyDeviceToHost));
-
-  // printf("Checking the results...\n");
-  // printf("...running CPU calculations.\n\n");
-  // // Calculate options values on CPU
-  // BlackScholesCPU(h_CallResultCPU, h_PutResultCPU, h_StockPrice, h_OptionStrike,
-  //                 h_OptionYears, RISKFREE, VOLATILITY, OPT_N);
-
-  // printf("Comparing the results...\n");
-  // // Calculate max absolute difference and L1 distance
-  // // between CPU and GPU results
-  // sum_delta = 0;
-  // sum_ref = 0;
-  // max_delta = 0;
-
-  // for (i = 0; i < OPT_N; i++) {
-  //   ref = h_CallResultCPU[i];
-  //   delta = fabs(h_CallResultCPU[i] - h_CallResultGPU[i]);
-
-  //   if (delta > max_delta) {
-  //     max_delta = delta;
-  //   }
-
-  //   sum_delta += delta;
-  //   sum_ref += fabs(ref);
-  // }
-
-  // L1norm = sum_delta / sum_ref;
-  // printf("L1 norm: %E\n", L1norm);
-  // printf("Max absolute error: %E\n\n", max_delta);
-
-  // printf("Shutting down...\n");
-  // printf("...releasing GPU memory.\n");
-  // checkCudaErrors(cudaFree(d_OptionYears));
-  // checkCudaErrors(cudaFree(d_OptionStrike));
-  // checkCudaErrors(cudaFree(d_StockPrice));
-  // checkCudaErrors(cudaFree(d_PutResult));
-  // checkCudaErrors(cudaFree(d_CallResult));
-
-  // printf("...releasing CPU memory.\n");
-  // free(h_OptionYears);
-  // free(h_OptionStrike);
-  // free(h_StockPrice);
-  // free(h_PutResultGPU);
-  // free(h_CallResultGPU);
-  // free(h_PutResultCPU);
-  // free(h_CallResultCPU);
-  // sdkDeleteTimer(&hTimer);
-  // printf("Shutdown done.\n");
-
-  // printf("\n[BlackScholes] - Test Summary\n");
-
-  // if (L1norm > 1e-6) {
-  //   printf("Test failed!\n");
-  //   exit(EXIT_FAILURE);
-  // }
 
   exit(EXIT_SUCCESS);
 }

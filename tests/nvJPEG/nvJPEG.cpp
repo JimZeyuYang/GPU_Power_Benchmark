@@ -44,7 +44,9 @@ int host_free(void* p) { return (int)cudaFreeHost(p); }
 typedef std::vector<std::string> FileNames;
 typedef std::vector<std::vector<char> > FileData;
 
-#define REPEAT (20)
+#define REPEAT (40)
+#define SHIFTS (8)
+
 
 struct decode_params_t {
   std::string input_dir;
@@ -490,17 +492,17 @@ int main(int argc, const char *argv[]) {
       return EXIT_WAIVED;
     }
   }
-
+//////////////////////////////////////////////////////////////
   params.batch_size = 512;
   if ((pidx = findParamIndex(argv, argc, "-b")) != -1) {
     params.batch_size = std::atoi(argv[pidx + 1]);
   }
 
-  params.total_images = 512 * REPEAT;
+  params.total_images = 512 * REPEAT / SHIFTS;
   if ((pidx = findParamIndex(argv, argc, "-t")) != -1) {
     params.total_images = std::atoi(argv[pidx + 1]);
   }
-
+//////////////////////////////////////////////////////////////
   params.dev = 0;
   params.dev = findCudaDevice(argc, argv);
 
@@ -598,20 +600,23 @@ int main(int argc, const char *argv[]) {
 
   double total;
 
-  uint64_t start_ts, end_ts;
-  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
-  if (process_images(image_names, params, total)) return EXIT_FAILURE;
-  
-  cudaDeviceSynchronize();
-  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
- 
+  uint64_t time_array[SHIFTS*2];
+
+  for (int i = 0; i < SHIFTS; i++) {
+    time_array[i*2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    if (process_images(image_names, params, total)) return EXIT_FAILURE;
+    cudaDeviceSynchronize();
+    time_array[i*2+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  }
+
   // Write the timestamps to a file
   std::ofstream outfile;
   outfile.open("timestamps.csv");
   outfile << "timestamp" << std::endl;
-  outfile << start_ts << std::endl;
-  outfile << end_ts << std::endl;
+  for (int i = 0; i < SHIFTS*2; i++) {
+    outfile << time_array[i] << std::endl;
+  }
   outfile.close();
 
   // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 /  params.total_images * params.batch_size);

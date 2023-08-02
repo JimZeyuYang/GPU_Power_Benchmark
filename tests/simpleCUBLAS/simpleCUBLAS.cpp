@@ -44,7 +44,8 @@
 
 /* Matrix size */
 #define N (8192)
-#define REPEAT (125)
+#define REPEAT (88)
+#define SHIFTS (8)
 
 /* Main */
 int main(int argc, char **argv) {
@@ -157,24 +158,20 @@ int main(int argc, char **argv) {
 
   // printf("Kernel Executing..\n");
 
-  uint64_t start_ts, end_ts;
-  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  uint64_t time_array[SHIFTS*2];
 
-
-  /* Performs operation using cublas */
-  for (int i = 0; i < REPEAT; i++)    status = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, d_A, N, d_B, N, &beta, d_C, N);
-
-
-  cudaDeviceSynchronize();
-  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  for (int i = 0; i < SHIFTS; i++) {
+    time_array[i*2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    for (int j = 0; j < REPEAT/SHIFTS; j++)    status = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha, d_A, N, d_B, N, &beta, d_C, N);
+    cudaDeviceSynchronize();
+    time_array[i*2+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  }
 
 
   if (status != CUBLAS_STATUS_SUCCESS) {
     fprintf(stderr, "!!!! kernel execution error.\n");
     return EXIT_FAILURE;
   }
-
-  // printf("Kernel Executed..\n");
 
   // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
   // printf("Total runtim: %f ms\n", (end_ts - start_ts) / 1000.0);
@@ -183,8 +180,9 @@ int main(int argc, char **argv) {
   std::ofstream outfile;
   outfile.open("timestamps.csv");
   outfile << "timestamp" << std::endl;
-  outfile << start_ts << std::endl;
-  outfile << end_ts << std::endl;
+  for (int i = 0; i < SHIFTS*2; i++) {
+    outfile << time_array[i] << std::endl;
+  }
   outfile.close();
 
 

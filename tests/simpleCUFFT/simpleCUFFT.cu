@@ -45,7 +45,8 @@
 typedef float2 Complex;
 
 #define SIGNAL_SIZE 300000000
-#define REPEAT (194)
+#define REPEAT (304)
+#define SHIFTS (8)
 
 int main(int argc, char **argv) { 
   findCudaDevice(argc, (const char **)argv); 
@@ -75,19 +76,16 @@ int main(int argc, char **argv) {
   for (int i = 0; i < 2; i++) cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal), reinterpret_cast<cufftComplex *>(d_signal), CUFFT_FORWARD);
   checkCudaErrors(cudaDeviceSynchronize());
 
-  // printf("Transforming signal cufftExecC2C\n");
+  uint64_t time_array[SHIFTS*2];
 
-  uint64_t start_ts, end_ts;
-  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-
-  for (int i = 0; i < REPEAT; i++) cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal), reinterpret_cast<cufftComplex *>(d_signal), CUFFT_FORWARD);
-  checkCudaErrors(cudaDeviceSynchronize());
-
-  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-
+  for (int i = 0; i < SHIFTS; i++) {
+    time_array[i*2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    for (int j = 0; j < REPEAT/SHIFTS; j++) cufftExecC2C(plan, reinterpret_cast<cufftComplex *>(d_signal), reinterpret_cast<cufftComplex *>(d_signal), CUFFT_FORWARD);
+    cudaDeviceSynchronize();
+    time_array[i*2+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  }
 
 
-  // printf("Done\n");
   // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
   // printf("Total runtime: %f ms\n", (end_ts - start_ts) / 1000.0);
 
@@ -95,8 +93,9 @@ int main(int argc, char **argv) {
   std::ofstream outfile;
   outfile.open("timestamps.csv");
   outfile << "timestamp" << std::endl;
-  outfile << start_ts << std::endl;
-  outfile << end_ts << std::endl;
+  for (int i = 0; i < SHIFTS*2; i++) {
+    outfile << time_array[i] << std::endl;
+  }
   outfile.close();
 
   // Copy device memory to host

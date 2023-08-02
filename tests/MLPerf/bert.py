@@ -9,7 +9,8 @@ from faker import Faker
 import warnings
 
 def main():
-    REPEAT = 20
+    REPEAT = 32
+    SHIFTS = 8
 
     warnings.filterwarnings('ignore')
 
@@ -58,25 +59,27 @@ def main():
 
     # Move the model to the GPU
     model = model.to(device)
+    start_ts = []
+    end_ts = []
 
     # warm up
     with torch.no_grad():  model(input_ids, attention_mask=attention_masks)
     torch.cuda.synchronize()
 
-    start_ts = int(time.time() * 1_000_000)
-
     with torch.no_grad():
-        for i in range(REPEAT):
-            model(input_ids, attention_mask=attention_masks)
-    torch.cuda.synchronize()
-
-    end_ts = int(time.time() * 1_000_000)
+        for i in range(SHIFTS):
+            start_ts.append(int(time.time() * 1_000_000))
+            for j in range(int(REPEAT/SHIFTS)):
+                model(input_ids, attention_mask=attention_masks)
+            torch.cuda.synchronize()
+            end_ts.append(int(time.time() * 1_000_000))
 
     # Store timestamps in a file
     with open("timestamps.csv", "w") as f:
         f.write("timestamp\n")
-        f.write(str(start_ts) + "\n")
-        f.write(str(end_ts) + "\n")
+        for start, end in zip(start_ts, end_ts):
+            f.write(str(start) + "\n")
+            f.write(str(end) + "\n")
 
     # print("Time spent per batch: {:.3f} ms".format((end_ts - start_ts) / 1000 / REPEAT))
     # print("Total runtime: {:.3f} ms".format((end_ts - start_ts) / 1000))

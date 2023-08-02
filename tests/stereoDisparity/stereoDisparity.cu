@@ -47,7 +47,8 @@
 #include <helper_string.h>  // helper functions for string parsing
 
 static const char *sSDKsample = "[stereoDisparity]\0";
-#define REPEAT (426)
+#define REPEAT (640)
+#define SHIFTS (8)
 
 
 int iDivUp(int a, int b) { return ((a % b) != 0) ? (a / b + 1) : (a / b); }
@@ -199,25 +200,26 @@ void runTest(int argc, char **argv) {
   checkCudaErrors(cudaEventRecord(start, NULL));
 
 
-
   for (int i = 0; i < 2; i++) stereoDisparityKernel<<<numBlocks, numThreads>>> (d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
   cudaDeviceSynchronize();
-  uint64_t start_ts, end_ts;
-  start_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
-  // launch the stereoDisparity kernel
-  for (int i = 0; i < REPEAT; i++) stereoDisparityKernel<<<numBlocks, numThreads>>> (d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
+  uint64_t time_array[SHIFTS*2];
 
-  cudaDeviceSynchronize();
-  end_ts = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  for (int i = 0; i < SHIFTS; i++) {
+    time_array[i*2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    for (int j = 0; j < REPEAT/SHIFTS; j++)   stereoDisparityKernel<<<numBlocks, numThreads>>> (d_img0, d_img1, d_odata, w, h, minDisp, maxDisp, tex2Dleft, tex2Dright);
+    cudaDeviceSynchronize();
+    time_array[i*2+1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  }
 
 
   // Write the timestamps to a file
   std::ofstream outfile;
   outfile.open("timestamps.csv");
   outfile << "timestamp" << std::endl;
-  outfile << start_ts << std::endl;
-  outfile << end_ts << std::endl;
+  for (int i = 0; i < SHIFTS*2; i++) {
+    outfile << time_array[i] << std::endl;
+  }
   outfile.close();
 
   // printf("Kernel Execution Time: %f ms\n", (end_ts - start_ts) / 1000.0 / REPEAT);
