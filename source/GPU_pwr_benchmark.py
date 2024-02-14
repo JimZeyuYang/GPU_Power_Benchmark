@@ -628,7 +628,7 @@ class GPU_pwr_benchmark:
                 values[i+1] = signed
 
             # populate the dictionary ###########################################
-            data_dict['timestamp'].append(timestamp / 2933.5)
+            data_dict['timestamp'].append(timestamp / 2934.5)
             data_dict['pcie_total_p'].append( values[1] * 0.007568 * values[2] * 0.0488
                                         + values[3] * 0.007568 * values[4] * 0.0488
                                         + values[7] * 0.007568 * values[8] * 0.0488)
@@ -1230,7 +1230,7 @@ class GPU_pwr_benchmark:
             for window in avg_windows:
                 loss = loss_func([window, 0])
                 losses.append(loss)
-            
+
             fig, ax = plt.subplots(nrows=1, ncols=1)
             ax.plot(avg_windows, losses, label='Loss from nvidia_smi')
 
@@ -1242,6 +1242,10 @@ class GPU_pwr_benchmark:
                     pmd_losses.append(loss)
 
                 ax.plot(avg_windows, pmd_losses, label='Loss from PMD')
+
+            # sace the avg_windows, losses, pmd_losses ina csv file
+            df = pd.DataFrame({'avg_windows': avg_windows, 'losses': losses, 'pmd_losses': pmd_losses})
+            df.to_csv(os.path.join(result_dir, 'loss.csv'), index=False)
 
 
             ax.set_xlabel('avg_window (ms)')
@@ -1264,8 +1268,12 @@ class GPU_pwr_benchmark:
         reconstructed = self._reconstruction(load, power, variables[0], variables[1])
 
         # discard the beginning 20% and the end 10% of the data
-        power = power.iloc[int(len(power)*0.2):int(len(power)*0.9)]
-        reconstructed = reconstructed.iloc[int(len(reconstructed)*0.2):int(len(reconstructed)*0.9)]
+        # power = power.iloc[int(len(power)*0.2):int(len(power)*0.9)]
+        # reconstructed = reconstructed.iloc[int(len(reconstructed)*0.2):int(len(reconstructed)*0.9)]
+
+        power = power.iloc[int(len(power)*0.4):int(len(power)*0.5)]
+        reconstructed = reconstructed.iloc[int(len(reconstructed)*0.4):int(len(reconstructed)*0.5)]
+
 
         # norm the 2 signals before calculating the loss
         power_norm = (power[self.exp_2_pwr_option] - power[self.exp_2_pwr_option].mean()) / power[self.exp_2_pwr_option].std()
@@ -1324,7 +1332,86 @@ class GPU_pwr_benchmark:
 
         return reconstructed
 
+
+
+
+
     def _plot_reconstr_result(self, load_period, load, power, avg_window, delay, reconstructed, store_path,
+                                PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
+
+        fig, axis = plt.subplots(nrows=4, ncols=1)
+
+
+        ax0_2 = axis[0].twinx()
+
+        axis[0].fill_between(PMD_data.index, PMD_data['total_p'], PMD_data['eps_total_p'], label='PCIE power cables', color='#002147')
+        axis[0].fill_between(PMD_data.index, PMD_data['eps_total_p'], 0, label='PCIE x16 slot', color='#008FC2')
+        axis[0].set_ylabel('Power [W]')
+        axis[0].set_xlim(axis[0].get_xlim())
+        
+        
+
+        ax0_2.plot(load.index, load['activity'], label='Load square wave', color='#ed1c24', linewidth=0.75)
+        ax0_2.set_ylabel('Load')
+        ax0_2.set_yticks([0, 1])
+        ax0_2.set_yticklabels([0, 1])
+        axis[0].set_xlim(1000, 8000)
+        axis[0].set_xticklabels([])
+
+        ax0_2.fill_between([-1,-2], [0,1], [0,1], label='PCIE power cables', color='#002147')
+        ax0_2.fill_between([-1,-2], [0,1], [0,1], label='PCIE x16 slot', color='#008FC2')
+
+        ax0_2.legend(loc='lower right')
+        # axis[0].legend(loc='lower right')
+
+        # normalize power.exp_2_pwr_option
+        power_norm = (power[self.exp_2_pwr_option] - power[self.exp_2_pwr_option].mean()) / power[self.exp_2_pwr_option].std()
+        axis[1].plot(power.index, power_norm, label='Power draw from nvidia-smi', color='#76b900')
+        # axis[1].plot(power.index, power[self.exp_2_pwr_option], label='Power draw', color='#76b900')
+        # axis[1].set_ylabel('Power [W]')
+        axis[1].set_xticklabels([])
+        axis[1].grid(True, linestyle='--', linewidth=0.5)
+        axis[1].set_xlim(axis[0].get_xlim())
+        axis[1].legend(loc='lower right')
+
+        reconstructed = reconstructed.loc[reconstructed.index.repeat(2)]
+        reconstructed[self.exp_2_pwr_option] = reconstructed[self.exp_2_pwr_option].shift()
+        reconstructed = reconstructed.dropna()
+
+        reconstructed_norm = (reconstructed[self.exp_2_pwr_option] - reconstructed[self.exp_2_pwr_option].mean()) / reconstructed[self.exp_2_pwr_option].std()
+        axis[3].plot(reconstructed.index, reconstructed_norm, label='Reconstructed power draw from load square wave', color='#ed1c24')
+        # axis[2].plot(reconstructed.index, reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw', color='#008FC2')
+        # axis[2].set_ylabel('Power [W]')
+        axis[2].set_xticklabels([])
+        axis[3].grid(True, linestyle='--', linewidth=0.5)
+        axis[3].set_xlim(axis[0].get_xlim())
+        axis[3].legend(loc='lower right')
+
+        PMD_reconstructed = PMD_reconstructed.loc[PMD_reconstructed.index.repeat(2)]
+        PMD_reconstructed[self.exp_2_pwr_option] = PMD_reconstructed[self.exp_2_pwr_option].shift()
+        PMD_reconstructed = PMD_reconstructed.dropna()
+
+        PMD_reconstructed_norm = (PMD_reconstructed[self.exp_2_pwr_option] - PMD_reconstructed[self.exp_2_pwr_option].mean()) / PMD_reconstructed[self.exp_2_pwr_option].std()
+        axis[2].plot(PMD_reconstructed.index, PMD_reconstructed_norm, label='Reconstructed power draw from PMD data', color='#002147')
+        # axis[3].plot(PMD_reconstructed.index, PMD_reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw from PMD data', color='#008FC2')
+        axis[3].set_xlabel('Time (ms)')
+        # axis[3].set_ylabel('Power [W]')
+        axis[2].grid(True, linestyle='--', linewidth=0.5)
+        axis[2].set_xlim(axis[0].get_xlim())
+        axis[2].legend(loc='lower right')
+
+
+        fig.set_size_inches(7, 8)
+        plt.subplots_adjust(hspace=0.075)
+        plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+        plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
+        plt.savefig(os.path.join(store_path, 'result.eps'), format='eps', bbox_inches='tight')
+        plt.close('all')
+
+
+
+
+    def _plot_reconstr_resultxxx(self, load_period, load, power, avg_window, delay, reconstructed, store_path,
                                 PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
 
         
@@ -1474,13 +1561,109 @@ class GPU_pwr_benchmark:
         plt.close('all')
 
 
-    def process_exp_3(self, result_dir):
-        color_palette =   {1 : '#BDCCFF', 4 : '#8D9DCE', 8 : '#5F709F'}
-        correct_palette = {1 : '#acd566', 4 : '#76b900', 8 : '#466f00'}
+    # def process_exp_3(self, result_dir):
+    #     color_palette =   {1 : '#BDCCFF', 4 : '#8D9DCE', 8 : '#5F709F'}
+    #     correct_palette = {1 : '#acd566', 4 : '#76b900', 8 : '#466f00'}
 
+
+    #     if self.gpu_name == 'NVIDIA_GeForce_RTX_3090':
+    #         gnd_truth = {'workload_0.25_pd' : 7.861696, 'workload_1_pd' : 30.446554, 'workload_8_pd' : 238.511096}
+    #     elif self.gpu_name == 'NVIDIA_A100-PCIE-40GB':
+    #         gnd_truth = {'workload_0.25_pd' : 3.778457, 'workload_1_pd' : 15.450307, 'workload_8_pd' : 124.0391686}
+
+
+    #     tests_list = os.listdir(result_dir)
+    #     tests_list = [test for test in tests_list if os.path.isdir(os.path.join(result_dir, test))]
+    #     tests_list.sort(key=lambda x: float(x.split('_')[-2]))
+
+
+    #     fig, ax = plt.subplots(nrows=2, ncols=3)
+
+    #     for plot_num, test in enumerate(tests_list):
+    #         print(f'Processing test: {test}')
+
+    #         ax[0, plot_num].set_title(f'{test} - {self.gpu_name}')
+    #         ax[0, plot_num].set_xlabel('# of repetitions')
+    #         ax[0, plot_num].set_ylabel('Standard Deviation [% of groung truth]')
+    #         # create secondary axis
+    #         ax[1, plot_num].set_xlabel('# of repetitions')
+    #         ax[1, plot_num].set_ylabel('Error [% of groung truth]')
+
+    #         shifts_list = os.listdir(os.path.join(result_dir, test))
+    #         shifts_list.sort(key=lambda x: int(x.split('_')[-1]))
+
+    #         for shift in shifts_list:
+    #             print(f'  Processing shift: {shift}')
+    #             num_shift = int(shift.split('_')[-1])
+
+    #             reps_list = os.listdir(os.path.join(result_dir, test, shift))
+    #             reps_list.sort(key=lambda x: int(x.split('_')[-1]))
+
+    #             rep_result =  []
+    #             std_result = []
+    #             err_result = []
+    #             correct_rep_result = []
+    #             correct_std_result = []
+    #             correct_err_result = []
+
+    #             for reps in reps_list:
+    #                 print(f'    Processing reps: {reps}')
+    #                 num_reps = int(reps.split('_')[-1])
+
+    #                 iters_list = os.listdir(os.path.join(result_dir, test, shift, reps))
+    #                 iters_list.sort(key=lambda x: int(x.split('_')[-1]))
+
+    #                 iters_dir = [os.path.join(result_dir, test, shift, reps, iters) for iters in iters_list]
+
+
+    #                 num_processes = min(len(iters_dir), os.cpu_count())
+    #                 pool = Pool(num_processes)
+    #                 results = pool.map(self._exp_3_calculate_power, iters_dir)
+    #                 results = list(map(list, zip(*results)))
+    #                 energy_list = results[0]
+    #                 correct_list = results[1]
+
+    #                 rep_result.append(num_reps)
+    #                 std_result.append(np.std(energy_list) / gnd_truth[test] * 100)
+    #                 err_result.append((np.mean(energy_list) - gnd_truth[test]) / gnd_truth[test] * 100)
+
+    #                 if np.mean(correct_list) > 0:
+    #                     correct_rep_result.append(num_reps)
+    #                     correct_std_result.append(np.std(correct_list) / gnd_truth[test] * 100)
+    #                     correct_err_result.append((np.mean(correct_list) - gnd_truth[test]) / gnd_truth[test] * 100)
+
+                
+    #             ax[0, plot_num].plot(rep_result, std_result, '--o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
+    #             ax[1, plot_num].plot(rep_result, err_result, '--o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
+
+    #             ax[0, plot_num].plot(correct_rep_result, correct_std_result, '-o', color=correct_palette[num_shift], linewidth=2, label=f'{num_shift} shifts (Corrected)')
+    #             ax[1, plot_num].plot(correct_rep_result, correct_err_result, '-o', color=correct_palette[num_shift], linewidth=2, label=f'{num_shift} shifts (Corrected)')
+
+    #             print(rep_result)
+    #             print(std_result)
+    #             print(err_result)
+    #             print(correct_rep_result)
+    #             print(correct_std_result)
+    #             print(correct_err_result)
+
+    #         ax[0, plot_num].legend(loc='upper right')
+    #         ax[1, plot_num].legend(loc='lower right')
+
+    #     fig.set_size_inches(20, 10)
+    #     plt.savefig(os.path.join(result_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+    #     plt.savefig(os.path.join(result_dir, 'result.svg'), format='svg', bbox_inches='tight')
+    #     plt.close('all')
+            
+
+
+    def process_exp_3(self, result_dir):
+        color_1 = '#5e9400'
+        color_2 = '#008FC2'
+
+        titles = ['25ms period', '100ms period', '800ms period']
 
         if self.gpu_name == 'NVIDIA_GeForce_RTX_3090':
-            gnd_truth = {'workload_0.25_pd' : 7.861696, 'workload_1_pd' : 30.446554, 'workload_8_pd' : 238.511096}
+            gnd_truth = {'workload_0.25_pd' : 7.861696, 'workload_1_pd' : 30.446554, 'workload_8_pd' : 240.511096}
         elif self.gpu_name == 'NVIDIA_A100-PCIE-40GB':
             gnd_truth = {'workload_0.25_pd' : 3.153843, 'workload_1_pd' : 12.629575, 'workload_8_pd' : 102.533766}
             for key, value in gnd_truth.items():
@@ -1492,78 +1675,90 @@ class GPU_pwr_benchmark:
         tests_list.sort(key=lambda x: float(x.split('_')[-2]))
 
 
-        fig, ax = plt.subplots(nrows=2, ncols=3)
+        fig, ax = plt.subplots(nrows=1, ncols=3)
+        ax[0].set_ylabel('Error [% of groung truth]')
+        ax[0].yaxis.label.set_color(color_1)
 
         for plot_num, test in enumerate(tests_list):
             print(f'Processing test: {test}')
 
-            ax[0, plot_num].set_title(f'{test} - {self.gpu_name}')
-            ax[0, plot_num].set_xlabel('# of repetitions')
-            ax[0, plot_num].set_ylabel('Standard Deviation [% of groung truth]')
+            ax[plot_num].set_title(titles[plot_num])
             # create secondary axis
-            ax[1, plot_num].set_xlabel('# of repetitions')
-            ax[1, plot_num].set_ylabel('Error [% of groung truth]')
+            ax[plot_num].set_xlabel('# of repetitions')
+            
+            ax_2nd = ax[plot_num].twinx()
+
+            ax[plot_num].tick_params(axis='y', colors=color_1)
+            ax_2nd.tick_params(axis='y', colors=color_2)
+
+            ax_2nd.spines['left'].set_color(color_1)
+            ax_2nd.spines['right'].set_color(color_2)
 
             shifts_list = os.listdir(os.path.join(result_dir, test))
             shifts_list.sort(key=lambda x: int(x.split('_')[-1]))
 
-            for shift in shifts_list:
-                print(f'  Processing shift: {shift}')
-                num_shift = int(shift.split('_')[-1])
+            shift = shifts_list[0]
+            print(f'  Processing shift: {shift}')
+            num_shift = int(shift.split('_')[-1])
 
-                reps_list = os.listdir(os.path.join(result_dir, test, shift))
-                reps_list.sort(key=lambda x: int(x.split('_')[-1]))
+            reps_list = os.listdir(os.path.join(result_dir, test, shift))
+            reps_list.sort(key=lambda x: int(x.split('_')[-1]))
 
-                rep_result =  []
-                std_result = []
-                err_result = []
-                correct_rep_result = []
-                correct_std_result = []
-                correct_err_result = []
+            rep_result =  []
+            std_result = []
+            err_result = []
+            correct_rep_result = []
+            correct_std_result = []
+            correct_err_result = []
 
-                for reps in reps_list:
-                    print(f'    Processing reps: {reps}')
-                    num_reps = int(reps.split('_')[-1])
+            for reps in reps_list:
+                print(f'    Processing reps: {reps}')
+                num_reps = int(reps.split('_')[-1])
 
-                    iters_list = os.listdir(os.path.join(result_dir, test, shift, reps))
-                    iters_list.sort(key=lambda x: int(x.split('_')[-1]))
+                iters_list = os.listdir(os.path.join(result_dir, test, shift, reps))
+                iters_list.sort(key=lambda x: int(x.split('_')[-1]))
 
-                    iters_dir = [os.path.join(result_dir, test, shift, reps, iters) for iters in iters_list]
-
-
-                    num_processes = min(len(iters_dir), os.cpu_count())
-                    pool = Pool(num_processes)
-                    results = pool.map(self._exp_3_calculate_power, iters_dir)
-                    results = list(map(list, zip(*results)))
-                    energy_list = results[0]
-                    correct_list = results[1]
-
-                    rep_result.append(num_reps)
-                    std_result.append(np.std(energy_list) / gnd_truth[test] * 100)
-                    err_result.append((np.mean(energy_list) - gnd_truth[test]) / gnd_truth[test] * 100)
-
-                    if np.mean(correct_list) > 0:
-                        correct_rep_result.append(num_reps)
-                        correct_std_result.append(np.std(correct_list) / gnd_truth[test] * 100)
-                        correct_err_result.append((np.mean(correct_list) - gnd_truth[test]) / gnd_truth[test] * 100)
-
-                
-                ax[0, plot_num].plot(rep_result, std_result, '--o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
-                ax[1, plot_num].plot(rep_result, err_result, '--o', color=color_palette[num_shift], label=f'{num_shift} shifts', linewidth=2)
-
-                ax[0, plot_num].plot(correct_rep_result, correct_std_result, '-o', color=correct_palette[num_shift], linewidth=2, label=f'{num_shift} shifts (Corrected)')
-                ax[1, plot_num].plot(correct_rep_result, correct_err_result, '-o', color=correct_palette[num_shift], linewidth=2, label=f'{num_shift} shifts (Corrected)')
+                iters_dir = [os.path.join(result_dir, test, shift, reps, iters) for iters in iters_list]
 
 
-            ax[0, plot_num].legend(loc='upper right')
-            ax[1, plot_num].legend(loc='lower right')
+                num_processes = min(len(iters_dir), os.cpu_count())
+                pool = Pool(num_processes)
+                results = pool.map(self._exp_3_calculate_power, iters_dir)
+                results = list(map(list, zip(*results)))
+                energy_list = results[0]
+                correct_list = results[1]
 
-        fig.set_size_inches(20, 10)
+                rep_result.append(num_reps)
+                std_result.append(np.std(energy_list) / gnd_truth[test] * 100)
+                err_result.append((np.mean(energy_list) - gnd_truth[test]) / gnd_truth[test] * 100)
+
+                if np.mean(correct_list) > 0:
+                    correct_rep_result.append(num_reps)
+                    correct_std_result.append(np.std(correct_list) / gnd_truth[test] * 100)
+                    correct_err_result.append((np.mean(correct_list) - gnd_truth[test]) / gnd_truth[test] * 100)
+            
+            ax[plot_num].plot(rep_result, err_result, ':x', color=color_1, linewidth=2)
+            ax_2nd.plot(rep_result, std_result, ':x', color=color_2, linewidth=2)
+
+            ax[plot_num].plot(correct_rep_result, correct_err_result, '-o', color=color_1, linewidth=2)
+            ax_2nd.plot(correct_rep_result, correct_std_result, '-o', color=color_2, linewidth=2)
+
+        ax_2nd.plot(np.nan, np.nan, ':x', color='black', label='Original')
+        ax_2nd.plot(np.nan, np.nan, '-o', color='black', label='Corrected')
+        # ax_2nd.legend(bbox_to_anchor = (0.2,-0.055))
+        ax_2nd.legend(loc='center right')
+        
+        ax_2nd.set_ylabel('Standard Deviation [% of groung truth]')
+        ax_2nd.yaxis.label.set_color(color_2)
+
+        fig.set_size_inches(8.5, 4)
+        plt.subplots_adjust(wspace=0.37)
         plt.savefig(os.path.join(result_dir, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-        plt.savefig(os.path.join(result_dir, 'result.svg'), format='svg', bbox_inches='tight')
+        plt.savefig(os.path.join(result_dir, 'result.eps'), format='eps', bbox_inches='tight')
         plt.close('all')
-            
-            
+        
+
+
     def _exp_3_calculate_power(self, result_dir):
         duration = float(result_dir.split('/')[-4].split('_')[-2]) * 100
         num_shifts = int(result_dir.split('/')[-3].split('_')[-1])
@@ -1585,7 +1780,7 @@ class GPU_pwr_benchmark:
         power['timestamp'] += 60*60*1000 * self.jet_lag
         power['timestamp'] -= t0
         correct_power = power.copy()
-        correct_power['timestamp'] = correct_power['timestamp']
+        correct_power['timestamp'] = correct_power['timestamp'] - 100
         power.set_index('timestamp', inplace=True)
         power.sort_index(inplace=True)
         correct_power.set_index('timestamp', inplace=True)
@@ -1623,7 +1818,7 @@ class GPU_pwr_benchmark:
             ax.axvline(end_ts, color='r', linestyle='--', linewidth=1)
 
             ########################################################################
-            reps_to_ignore = math.ceil(200 / duration)
+            reps_to_ignore = math.ceil(1200 / duration)
             if reps_to_ignore >= (num_reps / num_shifts) :
                 correct_energy += 0
             else:
