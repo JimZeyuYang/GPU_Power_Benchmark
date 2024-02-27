@@ -9,12 +9,13 @@ import time
 from datetime import datetime, timezone
 import random
 import os
-from multiprocessing import Pool
+from multiprocessing import Pool, Process, Value
 import struct
 from scipy.optimize import minimize
 import csv
 import json
 import math
+import psutil
 
 class GPU_pwr_benchmark:
     def __init__(self, sw_meas, gpu_id=0, PMD=0, verbose=False):
@@ -67,9 +68,6 @@ class GPU_pwr_benchmark:
 
         self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
         self.pwr_update_freq = self._find_pwr_update_freq()
-        # self.scale_gradient, self.scale_intercept = 43877.8, -2322
-        # self.pwr_update_freq = 100
-        # self.jet_lag = -1
     
     def _log(self, message, end='\n'):
         with open(self.log_file, 'a') as f:
@@ -219,7 +217,7 @@ class GPU_pwr_benchmark:
             store_path = os.path.join(store_path, 'find_scale_param')
         os.makedirs(store_path)
 
-        niter = 100000
+        niter = 100
         duration = 0
 
         duration_list = []
@@ -325,6 +323,28 @@ class GPU_pwr_benchmark:
 
         return median_period
 
+    def _read_file(self, path):
+        with open(path, "r") as f:
+            contents = f.read().strip()
+            return contents
+
+    def _sample_cpu(self):
+        acpi_file = open(f'{self.exp_store_path}/acpi.csv', 'a')
+        cpuutil_file = open(f'{self.exp_store_path}/cpuutil.csv', 'a')
+        ctr = 0
+        while self.sampling_cpu.value:
+            out = str(time.time_ns())
+            for i in range(1, 5): out += ',' + self._read_file(f'/sys/class/hwmon/hwmon{i}/device/power1_average')
+            acpi_file.writelines(out + '\n')
+            if ctr % 10 == 0:
+                temp = 0
+                for i in range(14): temp += int(self._read_file(f'/sys/class/thermal/thermal_zone{i}/temp'))
+                out = f'{time.time_ns()},{psutil.cpu_percent()},{temp/14000}'
+                cpuutil_file.writelines(out + '\n')
+            time.sleep(0.01)
+
+        cpuutil_file.close()
+
     def run_experiment(self, experiment):
         if experiment == 1:
             # Experiment 1: Steady state and trasient response analysis
@@ -334,7 +354,9 @@ class GPU_pwr_benchmark:
             self._log('Running experiment 1: Steady state and transient response analysis...')
 
             os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
-            for percentage in range(0, 101, 20):
+            percentage_list = [100]
+            for percentage in percentage_list:
+            # for percentage in range(0, 101, 20):
                 print(f'  Running experiment with {percentage}% load...')
                 self._log(f'  Running experiment with {percentage}% load...')
                 # create the store path
@@ -539,6 +561,35 @@ class GPU_pwr_benchmark:
                     time.sleep(random.random())
 
                 print(' Done!')
+
+        elif experiment == 6:
+            #  Experiment 6: Testing the Grace Hopper
+            print('_________________________________________________')
+            print('Running experiment 6: Testing the Grace Hopper...')
+            self._log('_________________________________________________')
+            self._log('Running experiment 6: Testing the Grace Hopper...')
+
+            self.exp_store_path = os.path.join(self.result_dir, 'Experiment_6')
+            os.makedirs(self.exp_store_path)
+
+            with open(f'{self.exp_store_path}/acpi.csv', 'w') as acpi_file:
+                header = 'timestamp,module,grace,cpu,sysio'
+                acpi_file.writelines(header + '\n')
+
+            with open(f'{self.exp_store_path}/cpuutil.csv', 'w') as cpuutil_file:
+                header = 'timestamp,CPU_util,CPU_temp'
+                cpuutil_file.writelines(header + '\n')
+
+            self.sampling_cpu = Value('b', True)
+            self.cpu_measurement = Process(target=self._sample_cpu)
+
+            niters = int(4000 * self.scale_gradient + self.scale_intercept)
+            config = f'0,{niters},1,100'
+
+            self.cpu_measurement.start()
+            self._run_benchmark(4, config, self.exp_store_path, delay=False)
+            self.sampling_cpu.value = False
+            self.cpu_measurement.join()
 
         else:
             raise ValueError(f'Invalid experiment number {experiment}')
@@ -1243,9 +1294,9 @@ class GPU_pwr_benchmark:
 
                 ax.plot(avg_windows, pmd_losses, label='Loss from PMD')
 
-            # sace the avg_windows, losses, pmd_losses ina csv file
-            df = pd.DataFrame({'avg_windows': avg_windows, 'losses': losses, 'pmd_losses': pmd_losses})
-            df.to_csv(os.path.join(result_dir, 'loss.csv'), index=False)
+            # save the avg_windows, losses, pmd_losses ina csv file
+            # df = pd.DataFrame({'avg_windows': avg_windows, 'losses': losses, 'pmd_losses': pmd_losses})
+            # df.to_csv(os.path.join(result_dir, 'loss.csv'), index=False)
 
 
             ax.set_xlabel('avg_window (ms)')
@@ -1336,82 +1387,82 @@ class GPU_pwr_benchmark:
 
 
 
+    # def _plot_reconstr_result(self, load_period, load, power, avg_window, delay, reconstructed, store_path,
+    #                             PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
+
+    #     fig, axis = plt.subplots(nrows=4, ncols=1)
+
+
+    #     ax0_2 = axis[0].twinx()
+
+    #     axis[0].fill_between(PMD_data.index, PMD_data['total_p'], PMD_data['eps_total_p'], label='PCIE power cables', color='#002147')
+    #     axis[0].fill_between(PMD_data.index, PMD_data['eps_total_p'], 0, label='PCIE x16 slot', color='#008FC2')
+    #     axis[0].set_ylabel('Power [W]')
+    #     axis[0].set_xlim(axis[0].get_xlim())
+        
+        
+
+    #     ax0_2.plot(load.index, load['activity'], label='Load square wave', color='#ed1c24', linewidth=0.75)
+    #     ax0_2.set_ylabel('Load')
+    #     ax0_2.set_yticks([0, 1])
+    #     ax0_2.set_yticklabels([0, 1])
+    #     axis[0].set_xlim(1000, 8000)
+    #     axis[0].set_xticklabels([])
+
+    #     ax0_2.fill_between([-1,-2], [0,1], [0,1], label='PCIE power cables', color='#002147')
+    #     ax0_2.fill_between([-1,-2], [0,1], [0,1], label='PCIE x16 slot', color='#008FC2')
+
+    #     ax0_2.legend(loc='lower right')
+    #     # axis[0].legend(loc='lower right')
+
+    #     # normalize power.exp_2_pwr_option
+    #     power_norm = (power[self.exp_2_pwr_option] - power[self.exp_2_pwr_option].mean()) / power[self.exp_2_pwr_option].std()
+    #     axis[1].plot(power.index, power_norm, label='Power draw from nvidia-smi', color='#76b900')
+    #     # axis[1].plot(power.index, power[self.exp_2_pwr_option], label='Power draw', color='#76b900')
+    #     # axis[1].set_ylabel('Power [W]')
+    #     axis[1].set_xticklabels([])
+    #     axis[1].grid(True, linestyle='--', linewidth=0.5)
+    #     axis[1].set_xlim(axis[0].get_xlim())
+    #     axis[1].legend(loc='lower right')
+
+    #     reconstructed = reconstructed.loc[reconstructed.index.repeat(2)]
+    #     reconstructed[self.exp_2_pwr_option] = reconstructed[self.exp_2_pwr_option].shift()
+    #     reconstructed = reconstructed.dropna()
+
+    #     reconstructed_norm = (reconstructed[self.exp_2_pwr_option] - reconstructed[self.exp_2_pwr_option].mean()) / reconstructed[self.exp_2_pwr_option].std()
+    #     axis[3].plot(reconstructed.index, reconstructed_norm, label='Reconstructed power draw from load square wave', color='#ed1c24')
+    #     # axis[2].plot(reconstructed.index, reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw', color='#008FC2')
+    #     # axis[2].set_ylabel('Power [W]')
+    #     axis[2].set_xticklabels([])
+    #     axis[3].grid(True, linestyle='--', linewidth=0.5)
+    #     axis[3].set_xlim(axis[0].get_xlim())
+    #     axis[3].legend(loc='lower right')
+
+    #     PMD_reconstructed = PMD_reconstructed.loc[PMD_reconstructed.index.repeat(2)]
+    #     PMD_reconstructed[self.exp_2_pwr_option] = PMD_reconstructed[self.exp_2_pwr_option].shift()
+    #     PMD_reconstructed = PMD_reconstructed.dropna()
+
+    #     PMD_reconstructed_norm = (PMD_reconstructed[self.exp_2_pwr_option] - PMD_reconstructed[self.exp_2_pwr_option].mean()) / PMD_reconstructed[self.exp_2_pwr_option].std()
+    #     axis[2].plot(PMD_reconstructed.index, PMD_reconstructed_norm, label='Reconstructed power draw from PMD data', color='#002147')
+    #     # axis[3].plot(PMD_reconstructed.index, PMD_reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw from PMD data', color='#008FC2')
+    #     axis[3].set_xlabel('Time (ms)')
+    #     # axis[3].set_ylabel('Power [W]')
+    #     axis[2].grid(True, linestyle='--', linewidth=0.5)
+    #     axis[2].set_xlim(axis[0].get_xlim())
+    #     axis[2].legend(loc='lower right')
+
+
+    #     fig.set_size_inches(7, 8)
+    #     plt.subplots_adjust(hspace=0.075)
+    #     plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
+    #     plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
+    #     plt.savefig(os.path.join(store_path, 'result.eps'), format='eps', bbox_inches='tight')
+    #     plt.close('all')
+
+
+
+
     def _plot_reconstr_result(self, load_period, load, power, avg_window, delay, reconstructed, store_path,
-                                PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
-
-        fig, axis = plt.subplots(nrows=4, ncols=1)
-
-
-        ax0_2 = axis[0].twinx()
-
-        axis[0].fill_between(PMD_data.index, PMD_data['total_p'], PMD_data['eps_total_p'], label='PCIE power cables', color='#002147')
-        axis[0].fill_between(PMD_data.index, PMD_data['eps_total_p'], 0, label='PCIE x16 slot', color='#008FC2')
-        axis[0].set_ylabel('Power [W]')
-        axis[0].set_xlim(axis[0].get_xlim())
-        
-        
-
-        ax0_2.plot(load.index, load['activity'], label='Load square wave', color='#ed1c24', linewidth=0.75)
-        ax0_2.set_ylabel('Load')
-        ax0_2.set_yticks([0, 1])
-        ax0_2.set_yticklabels([0, 1])
-        axis[0].set_xlim(1000, 8000)
-        axis[0].set_xticklabels([])
-
-        ax0_2.fill_between([-1,-2], [0,1], [0,1], label='PCIE power cables', color='#002147')
-        ax0_2.fill_between([-1,-2], [0,1], [0,1], label='PCIE x16 slot', color='#008FC2')
-
-        ax0_2.legend(loc='lower right')
-        # axis[0].legend(loc='lower right')
-
-        # normalize power.exp_2_pwr_option
-        power_norm = (power[self.exp_2_pwr_option] - power[self.exp_2_pwr_option].mean()) / power[self.exp_2_pwr_option].std()
-        axis[1].plot(power.index, power_norm, label='Power draw from nvidia-smi', color='#76b900')
-        # axis[1].plot(power.index, power[self.exp_2_pwr_option], label='Power draw', color='#76b900')
-        # axis[1].set_ylabel('Power [W]')
-        axis[1].set_xticklabels([])
-        axis[1].grid(True, linestyle='--', linewidth=0.5)
-        axis[1].set_xlim(axis[0].get_xlim())
-        axis[1].legend(loc='lower right')
-
-        reconstructed = reconstructed.loc[reconstructed.index.repeat(2)]
-        reconstructed[self.exp_2_pwr_option] = reconstructed[self.exp_2_pwr_option].shift()
-        reconstructed = reconstructed.dropna()
-
-        reconstructed_norm = (reconstructed[self.exp_2_pwr_option] - reconstructed[self.exp_2_pwr_option].mean()) / reconstructed[self.exp_2_pwr_option].std()
-        axis[3].plot(reconstructed.index, reconstructed_norm, label='Reconstructed power draw from load square wave', color='#ed1c24')
-        # axis[2].plot(reconstructed.index, reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw', color='#008FC2')
-        # axis[2].set_ylabel('Power [W]')
-        axis[2].set_xticklabels([])
-        axis[3].grid(True, linestyle='--', linewidth=0.5)
-        axis[3].set_xlim(axis[0].get_xlim())
-        axis[3].legend(loc='lower right')
-
-        PMD_reconstructed = PMD_reconstructed.loc[PMD_reconstructed.index.repeat(2)]
-        PMD_reconstructed[self.exp_2_pwr_option] = PMD_reconstructed[self.exp_2_pwr_option].shift()
-        PMD_reconstructed = PMD_reconstructed.dropna()
-
-        PMD_reconstructed_norm = (PMD_reconstructed[self.exp_2_pwr_option] - PMD_reconstructed[self.exp_2_pwr_option].mean()) / PMD_reconstructed[self.exp_2_pwr_option].std()
-        axis[2].plot(PMD_reconstructed.index, PMD_reconstructed_norm, label='Reconstructed power draw from PMD data', color='#002147')
-        # axis[3].plot(PMD_reconstructed.index, PMD_reconstructed[self.exp_2_pwr_option], label='Reconstructed power draw from PMD data', color='#008FC2')
-        axis[3].set_xlabel('Time (ms)')
-        # axis[3].set_ylabel('Power [W]')
-        axis[2].grid(True, linestyle='--', linewidth=0.5)
-        axis[2].set_xlim(axis[0].get_xlim())
-        axis[2].legend(loc='lower right')
-
-
-        fig.set_size_inches(7, 8)
-        plt.subplots_adjust(hspace=0.075)
-        plt.savefig(os.path.join(store_path, 'result.jpg'), format='jpg', dpi=256, bbox_inches='tight')
-        plt.savefig(os.path.join(store_path, 'result.svg'), format='svg', bbox_inches='tight')
-        plt.savefig(os.path.join(store_path, 'result.eps'), format='eps', bbox_inches='tight')
-        plt.close('all')
-
-
-
-
-    def _plot_reconstr_resultxxx(self, load_period, load, power, avg_window, delay, reconstructed, store_path,
                                 PMD_data, PMD_avg_window, PMD_delay, PMD_reconstructed, error_msg):
 
         
@@ -1758,7 +1809,6 @@ class GPU_pwr_benchmark:
         plt.close('all')
         
 
-
     def _exp_3_calculate_power(self, result_dir):
         duration = float(result_dir.split('/')[-4].split('_')[-2]) * 100
         num_shifts = int(result_dir.split('/')[-3].split('_')[-1])
@@ -2077,8 +2127,6 @@ class GPU_pwr_benchmark:
 
 
         return naive_energy / num_shifts, correct_energy / num_shifts
-
-
 
 class stride_gen:
     def __init__(self, mode, grain):

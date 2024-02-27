@@ -1,5 +1,6 @@
 # ignore the env folder
 /env
+/env_aarch64
 /results
 
 # ignore the benchmark_load file under the bin folder

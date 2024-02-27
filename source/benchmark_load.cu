@@ -3,6 +3,7 @@
 #include <sstream>
 #include <vector>
 #include <chrono>
+#include <thread>
 
 #include <stdio.h>
 #include <unistd.h>
@@ -47,7 +48,6 @@ void printDevProps(cudaDeviceProp devProp) {
     std::cout << "Maximum shared memory per SM: " << devProp.sharedMemPerMultiprocessor << " B" << std::endl;
     std::cout << "Maximum global memory: " << devProp.totalGlobalMem << " B" << std::endl;
     std::cout << "Maximum blocks per SM: " << devProp.maxBlocksPerMultiProcessor << std::endl;
-    std::cout << "Maximum threads per SM: " << devProp.maxThreadsPerMultiProcessor << std::endl;
 }
 
 
@@ -86,6 +86,22 @@ void stop_PMD(int& serial_port, pthread_t& serialThread, ThreadArgs*& args, std:
     outfile << PMD_start << std::endl;
     outfile.close();
 } 
+
+
+
+void dummy_function(int niter) {
+    int seed = seed = std::chrono::system_clock::now().time_since_epoch().count() % 1000;
+    std::vector<int> data(10000);
+    for (int i=0; i<niter; i++) {
+        for (int j=0; j<std::size(data); j++) data[j] = (seed * j) % 10007;
+    }
+}
+
+void cpu_load(int niter) {
+    std::vector<std::thread> threads;
+    for (int i=0; i<69; i++) threads.emplace_back(dummy_function, niter);
+    for (auto& thread : threads) thread.join();
+}
 
 
 int main(int argc, const char **argv) {
@@ -234,6 +250,90 @@ int main(int argc, const char **argv) {
         float sum = 0.0;  for (int i=0; i<nsize; i++) sum += h_x[i];
         if (sum/nsize != CHECK)  printf("Warning: result is %f instead of %f\n", sum/nsize, CHECK);
         checkCudaErrors(cudaFree(d_x));  free(h_x);
+
+    } else if (experiment == 4) {  // Run a GPU and CPU Load
+        // Read the config variables
+        getline(ss, token, ',');  int delay      = std::stoi(token);
+        getline(ss, token, ',');  int niter      = std::stoi(token);
+        getline(ss, token, ',');  int testLength = std::stoi(token);
+        getline(ss, token, ',');  int percent    = std::stoi(token);
+
+        float *h_x, *d_x;
+        int nblocks, nthreads, nsize;
+
+        nblocks = devProp.multiProcessorCount * percent / 100;
+        if (nblocks < 1) nblocks = 1;
+        nthreads = devProp.maxThreadsPerBlock;
+        nsize    = nblocks * nthreads;
+
+        h_x = (float *)malloc(nsize*sizeof(float));
+        checkCudaErrors(cudaMalloc((void **)&d_x, nsize*sizeof(float)));
+
+        for (int i=0; i<nsize; i++) h_x[i] = CHECK;  checkCudaErrors(cudaMemcpy(d_x,h_x,nsize*sizeof(float), cudaMemcpyHostToDevice));
+
+        uint64_t timestamps[8];
+        
+        sleep(1);
+        // Start
+        timestamps[0] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        
+        // Idle for 4 seconds
+        std::cout << "Idle for 4 seconds" << std::endl;
+        sleep(4);
+        timestamps[1] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        
+        // Start the CPU load
+        std::cout << "CPU load for 4 seconds" << std::endl;
+        cpu_load(1.25e5);
+        timestamps[2] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Idle for 4 second
+        std::cout << "Idle for 4 second" << std::endl;
+        sleep(4);
+        timestamps[3] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        
+        // Start the GPU load
+        std::cout << "GPU load for 4 seconds" << std::endl;
+        my_first_kernel<<<nblocks,nthreads>>>(d_x, niter);
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess)  printf("my_first_kernel execution failed. CUDA error: %s\n", cudaGetErrorString(err));
+        cudaDeviceSynchronize();
+        timestamps[4] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Idle for 4 second
+        std::cout << "Idle for 4 second" << std::endl;
+        sleep(4);
+        timestamps[5] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Start the CPU and GPU load
+        std::cout << "CPU and GPU load for 4 seconds" << std::endl;
+        my_first_kernel<<<nblocks,nthreads>>>(d_x, niter);
+        err = cudaGetLastError();
+        if (err != cudaSuccess)  printf("my_first_kernel execution failed. CUDA error: %s\n", cudaGetErrorString(err));
+        cpu_load(1.25e5);
+        cudaDeviceSynchronize();
+        timestamps[6] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Idle for 1 second
+        std::cout << "Idle for 2 second" << std::endl;
+        sleep(2);
+        timestamps[7] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+
+        // Write the timestamps to a file
+        std::ofstream outfile;
+        outfile.open(result_dir + "/timestamps.csv");
+        outfile << "timestamp" << std::endl;
+        for (int i = 0; i < 8; i++) {
+            outfile << timestamps[i] << std::endl;
+        }
+        outfile.close();
+        
+        checkCudaErrors(cudaMemcpy(h_x,d_x,nsize*sizeof(float), cudaMemcpyDeviceToHost));
+        float sum = 0.0;  for (int i=0; i<nsize; i++) sum += h_x[i];
+        if (sum/nsize != CHECK)  printf("Warning: result is %f instead of %f\n", sum/nsize, CHECK);
+        checkCudaErrors(cudaFree(d_x));  free(h_x);
+
 
     } else {
             std::cout << "Invalid experiment number" << std::endl;
