@@ -9,6 +9,9 @@ import os
 import struct
 import csv
 import statistics
+from matplotlib.ticker import ScalarFormatter
+
+
 
 def linear_regression(x, y):
     X = np.column_stack((np.ones(len(x)), x))
@@ -143,19 +146,19 @@ def steam_gpu_share():
 
     fig.set_size_inches(7, 3)
     plt.savefig('steam_gpu_share.jpg', format='jpg', dpi=512, bbox_inches='tight')
-    plt.savefig('steam_gpu_share.eps', format='eps', bbox_inches='tight')
+    plt.savefig('steam_gpu_share.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close()
 
 def steady_state_accuracy():
     GPUs = [
-        "GeForce RTX 3090 #1", "GeForce RTX 3090 #2", "GeForce RTX 3090 #3", "GeForce RTX 3090 #4", "GeForce RTX 3090 #5",
-        "GeForce RTX 4090",
-        "GeForce RTX 3070 Ti",
-        "GeForce RTX 2080 Ti", "GeForce RTX 2060 SUPER",
-        "GeForce GTX TITAN X Pascal", "GeForce RTX 1080 Ti", "GeForce RTX 1080",
-        "GeForce GTX TITAN X",
-        "Quadro RTX A5000",
-        "Tesla A100 PCIE 40GB", "Tesla P100 PCIE 16GB", "Tesla M40", "Tesla K80", "Tesla K40m",
+        "RTX 3090 #1", "RTX 3090 #2", "RTX 3090 #3", "RTX 3090 #4", "RTX 3090 #5",
+        "RTX 4090",
+        "RTX 3070 Ti",
+        "RTX 2080 Ti", "RTX 2060 S",
+        "GTX TITAN Xp", "GTX 1080 Ti", "GTX 1080",
+        "GTX TITAN X",
+        "RTX A5000",
+        "A100 40G", "P100 16G", "M40", "K80", "K40m",
     ]
 
     Data = {
@@ -187,8 +190,8 @@ def steady_state_accuracy():
     GPUs = GPUs[::-1]
     Data['Gradient'] = Data['Gradient'][::-1]
     Data['Offset'] = Data['Offset'][::-1]
-    
-    
+
+    '''
     x = np.arange(len(GPUs))  # the label locations
     width = 0.4  # the width of the bars
     multiplier = 0
@@ -231,9 +234,50 @@ def steady_state_accuracy():
     ax2.spines['top'].set_color(colors['Gradient'])
     ax2.spines['bottom'].set_color(colors['Offset'])
 
-    fig.set_size_inches(6, 8)
+    fig.set_size_inches(6, 8.5)
+    '''
+    fig, axis = plt.subplots(nrows=1, ncols=2, sharey=True)
+    
+    x = np.arange(len(GPUs))  # the label locations
+    width = 0.9  # the width of the bars
+
+    gradient_rects = axis[0].barh(x, Data['Gradient'], width, label='Gradient', color=colors['Gradient'])
+    offset_rects = axis[1].barh(x, Data['Offset'], width, label='Offset', color=colors['Offset'])
+
+    axis[0].bar_label(gradient_rects, padding=3, labels=[f'{i:.2f}' if abs(i) < 7 else '' for i in Data['Gradient']])
+    axis[0].bar_label(gradient_rects, padding=-30, labels=[f'{i:.2f}' if abs(i) >= 7 else '' for i in Data['Gradient']])
+    axis[1].bar_label(offset_rects, padding=3, labels=[f'{i:.2f}' if abs(i) < 9 else '' for i in Data['Offset']])
+    axis[1].bar_label(offset_rects, padding=-35, labels=[f'{i:.2f}' if abs(i) >= 9 else '' for i in Data['Offset']])
+
+    axis[0].axvline(0, color='grey')
+    axis[1].axvline(0, color='grey')
+
+    axis[0].set_xlabel('Gradient / Percentage Error (%)')
+    axis[1].set_xlabel('Offset / y-intercept (W)')
+
+    axis[0].set_xlim(-10, 10)
+    axis[1].set_xlim(-13, 13)
+    axis[0].set_yticks(x)
+    axis[0].set_yticklabels(GPUs)
+
+    axis[0].set_ylim(-0.75, 18.75)
+
+    axis[0].xaxis.label.set_color(colors['Gradient'])
+    axis[0].tick_params(axis='x', colors=colors['Gradient'])
+    axis[1].xaxis.label.set_color(colors['Offset'])
+    axis[1].tick_params(axis='x', colors=colors['Offset'])
+    axis[0].spines['bottom'].set_color(colors['Gradient'])
+    axis[1].spines['bottom'].set_color(colors['Offset'])
+    
+    axis[0].xaxis.grid(True, linestyle='--', linewidth=0.5)
+    axis[1].xaxis.grid(True, linestyle='--', linewidth=0.5)
+
+    fig.subplots_adjust(left=0.15, right=0.99, bottom=0.1, top=0.9, wspace=0.065, hspace=0)
+
+    fig.set_size_inches(6.5, 5)
+
     plt.savefig('steady_state_accuracy.jpg', format='jpg', dpi=512, bbox_inches='tight')
-    plt.savefig('steady_state_accuracy.eps', format='eps', bbox_inches='tight')
+    plt.savefig('steady_state_accuracy.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close()
 
 def pwr_update_freq():
@@ -282,9 +326,9 @@ def pwr_update_freq():
     axis.legend(loc='upper center')
     axis.grid(True, linestyle='--', linewidth=0.5)
 
-    fig.set_size_inches(7.5, 3)
+    fig.set_size_inches(6.5, 2)
     plt.savefig('power_update_freq.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('power_update_freq.eps', format='eps', bbox_inches='tight')
+    plt.savefig('power_update_freq.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
 
     plt.close('all')
 
@@ -299,6 +343,9 @@ def scaling_params():
     A100 = [5.1573, 7.71185, 11.5556, 17.32705, 25.9817, 38.97465, 58.4456, 87.6444, 131.45495, 197.16775, 295.7412,
             443.5997, 665.3719, 998.05955, 1497.0885, 2245.5759, 3368.32845, 5052.5001, 7578.8348, 11367.46275]
 
+    niters = niters[:-3]
+    RTX3090 = [i / 1000 for i in RTX3090[:-3]]
+    A100 = [i / 1000 for i in A100[:-3]]
     rtx3090_intercept, rtx3090_gradient, rtx3090_r2 = linear_regression(niters, RTX3090)
     a100_intercept, a100_gradient, a100_r2 = linear_regression(niters, A100)
 
@@ -309,21 +356,20 @@ def scaling_params():
     fig, axis = plt.subplots(nrows=1, ncols=1)
 
     axis.plot(niters, RTX3090, 'o', color='#008FC2', label='GeForce RTX 3090')
-    axis.plot(x, rtx3090_y, ':', label=f'Line of best fit ($R^2$ = {rtx3090_r2:.4f})', color='#008FC2')
+    axis.plot(x, rtx3090_y, ':', label=f'Line of best fit ($R^2$={rtx3090_r2:.2f})', color='#008FC2')
 
     axis.plot(niters, A100, 'o', color='#76b900', label='Tesla A100-PCIe-40GB')
-    axis.plot(x, a100_y, ':', label=f'Line of best fit ($R^2$ = {a100_r2:.4f})', color='#76b900')
+    axis.plot(x, a100_y, ':', label=f'Line of best fit ($R^2$={a100_r2:.2f})', color='#76b900')
 
     axis.set_xlabel('Iterations')
-    axis.set_ylabel('Kernel Execution Time (ms)')
+    axis.set_ylabel('Kernel Execution Time (s)')
+    axis.set_ylim([-0.15,3.6])
     axis.legend(loc='lower right')
 
     axis.grid(True, linestyle='--', linewidth=0.5)
 
-
-
     # Here is the part for the inset
-    axins = inset_axes(axis, width="35%", height="35%", loc=2)  # loc=2 corresponds to 'upper left'
+    axins = inset_axes(axis, width="35%", height="40%", loc=2)  # loc=2 corresponds to 'upper left'
     axins.plot(niters, RTX3090, 'o', color='#008FC2')
     axins.plot(x, rtx3090_y, ':', color='#008FC2')
     axins.plot(niters, A100, 'o', color='#76b900')
@@ -331,7 +377,7 @@ def scaling_params():
 
     # Sub region of the original image
     axins.set_xlim(-100000, 3000000)
-    axins.set_ylim(-3, 50)
+    axins.set_ylim(-0.003, 0.050)
     axins.set_xticklabels('')
     axins.set_yticklabels('')
 
@@ -341,9 +387,9 @@ def scaling_params():
 
 
 
-    fig.set_size_inches(7.5, 5)
+    fig.set_size_inches(7.25, 4.25)
     plt.savefig('scaling_param.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('scaling_param.eps', format='eps', bbox_inches='tight')
+    plt.savefig('scaling_param.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
 
     plt.close('all')
 
@@ -385,6 +431,11 @@ def transient_response():
         PMD = convert_pmd_data(data_dir)
         PMD['timestamp'] -= t0
         PMD = PMD[(PMD['timestamp'] >= 0) & (PMD['timestamp'] <= t_max)]
+
+        print(PMD)
+        # delete 9 rows every 10 rows
+        PMD = PMD.iloc[::16]
+
         axis[i].fill_between(PMD['timestamp'], PMD['total_p'], PMD['eps_total_p'], label='Power cables', color='#002147')
         axis[i].fill_between(PMD['timestamp'], PMD['eps_total_p'], 0, label='PCIE x16 slot', color='#008FC2')
 
@@ -392,17 +443,23 @@ def transient_response():
         axis[i].plot(power['timestamp'], power[f' power.draw [W]'], label=f'nvidia-smi', linewidth=3, color='#76b900')
 
         axis[i].set_xlim(0, 3000)
-        axis[i].legend(loc='lower right')
+        axis[i].legend(loc='lower right', framealpha=1)
         axis[i].set_ylabel('Power draw (W)')
 
     axis[0].set_xticklabels([])
     axis[1].set_xticklabels([])
     axis[2].set_xticklabels([])
     axis[3].set_xlabel('Time (ms)')
-    fig.set_size_inches(8, 7)
+
+    axis[0].set_xlim(0, 2999)
+    axis[1].set_xlim(0, 2999)
+    axis[2].set_xlim(0, 2999)
+    axis[3].set_xlim(0, 2999)
+
+    fig.set_size_inches(7, 6.25)
     plt.subplots_adjust(hspace=0.075)
     plt.savefig('transient_response.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('transient_response.eps', format='eps', bbox_inches='tight')
+    plt.savefig('transient_response.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close('all')
 
 def plot_5050():
@@ -441,6 +498,9 @@ def plot_5050():
         PMD = convert_pmd_data(data_dir)
         PMD['timestamp'] -= t0
         PMD = PMD[(PMD['timestamp'] >= 0) & (PMD['timestamp'] <= t_max)]
+
+        # delete 9 rows every 10 rows
+        PMD = PMD.iloc[::16]
         axis[i].fill_between(PMD['timestamp'], PMD['total_p'], PMD['eps_total_p'], label='Power cables', color='#002147')
         axis[i].fill_between(PMD['timestamp'], PMD['eps_total_p'], 0, label='PCIE x16 slot', color='#008FC2')
 
@@ -448,15 +508,15 @@ def plot_5050():
         axis[i].plot(power['timestamp'], power[f' power.draw.instant [W]'], label=f'nvidia-smi', linewidth=3, color='#76b900')
 
         axis[i].set_xlim(1000, 8000)
-        axis[i].legend(loc='lower right')
+        axis[i].legend(loc='lower right', framealpha=1)
         axis[i].set_ylabel('Power draw (W)')
 
     axis[0].set_xticklabels([])
     axis[1].set_xlabel('Time (ms)')
-    fig.set_size_inches(7.5, 4.5)
+    fig.set_size_inches(7, 3.25)
     plt.subplots_adjust(hspace=0.075)
     plt.savefig('5050.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('5050.eps', format='eps', bbox_inches='tight')
+    plt.savefig('5050.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close('all')
 
 def loss_functions():
@@ -485,9 +545,9 @@ def loss_functions():
     axis.set_ylim(0, 1.55)
     axis.grid(True, linestyle='--', linewidth=0.5)
 
-    fig.set_size_inches(7, 3)
+    fig.set_size_inches(7.25, 2.5)
     plt.savefig('loss_func.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('loss_func.eps', format='eps', bbox_inches='tight')
+    plt.savefig('loss_func.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close('all')
 
 def violin_plots():
@@ -529,10 +589,12 @@ def violin_plots():
 
     axis[0].set_ylim(5, 15)
     axis[1].set_ylim(0, 40)
+    axis[2].set_ylim(94, 106)
     axis[0].set_ylabel('Averaging window (ms)')
-    fig.set_size_inches(8, 3)
+    fig.subplots_adjust(wspace=0.275)
+    fig.set_size_inches(7.25, 2.253)
     plt.savefig('violin_plot.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('violin_plot.eps', format='eps', bbox_inches='tight')
+    plt.savefig('violin_plot.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close('all')
 
 def temp():
@@ -667,7 +729,7 @@ def temp():
 
     for i in range(3):
         axis[i, 0].set_ylabel('Error [% of groung truth]')
-        axis[i, 1].set_ylabel('Std. Dev. [% of groung truth]')
+        axis[i, 1].set_ylabel('Std. [% of groung truth]')
         for j in range (2):
             axis[i, j].set_xlabel('# of Repetitions')
 
@@ -688,11 +750,13 @@ def temp():
 
     axis[0, 1].legend(loc='upper right')
 
+    axis[0, 1].set_yticks([0, 2, 4, 6, 8, 10, 12])
 
-    fig.set_size_inches(8, 9.5)
+
+    fig.set_size_inches(8.5, 8)
     plt.subplots_adjust(hspace=0.3)
     plt.savefig('A100_25_100.jpg', format='jpg', dpi=256, bbox_inches='tight')
-    plt.savefig('A100_25_100.eps', format='eps', bbox_inches='tight')
+    plt.savefig('A100_25_100.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close('all')
 
 def energy_meas():
@@ -776,15 +840,17 @@ def energy_meas():
 
     axis[2].barh(x, -2, width, left=-1, color='grey', hatch='///', edgecolor='white', label='Naive')
     axis[2].barh(x, -3, width, left=-1, color='grey', edgecolor='black', label='Fixed')
-    axis[2].set_xlim(0)
+    axis[2].set_xlim(0, 65)
 
-    axis[2].legend(ncols=1, loc='center right', bbox_to_anchor=(1.03, 0.19), frameon=True, edgecolor='black')
+    axis[0].set_ylim(-0.6, 9.6)
 
-    fig.subplots_adjust(left=0.15, right=0.99, bottom=0.1, top=0.9, wspace=0.08, hspace=0)
+    axis[2].legend(ncols=1, loc='center right', bbox_to_anchor=(1.03, 0.16), frameon=True, edgecolor='black')
 
-    fig.set_size_inches(7.5, 5)
+    fig.subplots_adjust(left=0.15, right=0.99, bottom=0.1, top=0.9, wspace=0.065, hspace=0)
+
+    fig.set_size_inches(7.5, 4.25)
     plt.savefig('energy_meas.jpg', format='jpg', dpi=512, bbox_inches='tight')
-    plt.savefig('energy_meas.eps', format='eps', bbox_inches='tight')
+    plt.savefig('energy_meas.pdf', format='pdf', bbox_inches='tight', pad_inches=0.01)
     plt.close()
 
 
@@ -797,8 +863,8 @@ def main():
     # plot_5050()
     # loss_functions()
     # violin_plots()
-    temp()
-    # energy_meas()
+    # temp()
+    energy_meas()
 
 if __name__ == "__main__":
     main()

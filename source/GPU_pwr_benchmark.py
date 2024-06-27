@@ -733,7 +733,7 @@ class GPU_pwr_benchmark:
 
                     # plot the points and the linear regression line
                     fig, ax = plt.subplots(nrows=1, ncols=1)
-
+                    print(pwr_pair)
                     ax.plot(pwr_pair[1], pwr_pair[0], '+', markersize=12, label='Steady state power draw')
                     x = np.linspace(0, max(pwr_pair[1]), 100)
                     y = gradient * x + intercept
