@@ -10,8 +10,10 @@ elif [ "$GPU_NAME" = "Quadro K620" ]; then
     ARCH="-arch=sm_50"
 elif [ "$GPU_NAME" = "NVIDIA GeForce GTX 745" ]; then
     ARCH="-arch=sm_50"
+elif [ "$GPU_NAME" = "NVIDIA GH200 480GB" ]; then
+    ARCH="-arch=sm_90"
 else
-    echo "GPU $GPU_NAME is not supported, using default"
+    echo "GPU $GPU_NAME uses default"
     ARCH=""
 fi
 

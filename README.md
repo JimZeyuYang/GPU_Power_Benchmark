@@ -67,9 +67,6 @@ On Ubuntu 22.04, to grant access to serial port (if PMD is present), run
 ## Support
 For questions and support please email zeyu.yang@eng.ox.ac.uk.
 
-## Roadmap
-Development to incorporate measurement strategies proposed in the paper is in progress. 
-
 ## License
 
 [MIT](https://choosealicense.com/licenses/mit/)
