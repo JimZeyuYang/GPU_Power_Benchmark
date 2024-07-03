@@ -5,12 +5,18 @@ import torch
 import time
 from faker import Faker
 
-
+import argparse
 import warnings
 
 def main():
-    REPEAT = 32
-    SHIFTS = 1
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-r', '--repeat', type=int)
+    parser.add_argument('-s', '--shifts', type=int)
+
+    args = parser.parse_args()
+
+    REPEAT = args.repeat
+    SHIFTS = args.shifts
 
     warnings.filterwarnings('ignore')
 

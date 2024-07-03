@@ -47,8 +47,6 @@
 #include <helper_string.h>  // helper functions for string parsing
 
 static const char *sSDKsample = "[stereoDisparity]\0";
-#define REPEAT (640)
-#define SHIFTS (1)
 
 
 int iDivUp(int a, int b) { return ((a % b) != 0) ? (a / b + 1) : (a / b); }
@@ -69,6 +67,27 @@ int main(int argc, char **argv) {
 //! CUDA Sample for calculating depth maps
 ////////////////////////////////////////////////////////////////////////////////
 void runTest(int argc, char **argv) {
+  // Variables to store the values of flags
+  int REPEAT = 1;
+  int SHIFTS = 1;
+
+  // Parsing command line arguments
+  for (int i = 1; i < argc; ++i) {
+      if (strcmp(argv[i], "-r") == 0) {
+          if (i + 1 < argc) { // Ensure there is an argument to consume
+              REPEAT = std::atoi(argv[++i]); // Increment 'i' to skip next argument
+          } else {
+              std::cerr << "Error: Option '-r' requires an integer value." << std::endl;
+          }
+      } else if (strcmp(argv[i], "-s") == 0) {
+          if (i + 1 < argc) { // Ensure there is an argument to consume
+              SHIFTS = std::atoi(argv[++i]); // Increment 'i' to skip next argument
+          } else {
+              std::cerr << "Error: Option '-s' requires an integer value." << std::endl;
+          }
+      }
+  }
+
   cudaDeviceProp deviceProp;
   deviceProp.major = 0;
   deviceProp.minor = 0;

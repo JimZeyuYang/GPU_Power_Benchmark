@@ -4,10 +4,19 @@ import time
 import numpy
 import torch
 import torchvision.models as models
+import argparse
 
 def main():
-    REPEAT = 32
-    SHIFTS = 1
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-r', '--repeat', type=int)
+    parser.add_argument('-s', '--shifts', type=int)
+
+    args = parser.parse_args()
+
+    REPEAT = args.repeat
+    SHIFTS = args.shifts
+    
+    BATCH_SIZE = 1024
 
     torch.hub.set_dir('.')
 
@@ -20,7 +29,7 @@ def main():
     model.eval()
     model = model.to(device)
 
-    bs = 2048
+    bs = BATCH_SIZE
     input_tensor = torch.randn(bs, 3, 224, 224).to(device)
 
     start_ts = []

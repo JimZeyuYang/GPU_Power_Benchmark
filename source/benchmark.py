@@ -25,7 +25,7 @@ def experiment(args):
     start = time.time()
 
     # check if the linux server hostname equals 'jim-linux', if yes, then use the PMD
-    if os.uname()[1] == 'jim-linux': PMD = 1
+    if os.uname()[1] == 'jls': PMD = 1
     else:                            PMD = 0
 
     benchmark = GPU_pwr_benchmark(args.sw_meas, gpu_id=args.gpu_id, PMD=PMD, verbose=args.verbose)

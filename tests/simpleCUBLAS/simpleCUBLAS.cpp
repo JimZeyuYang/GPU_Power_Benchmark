@@ -37,6 +37,7 @@
 #include <string.h>
 #include <chrono>
 #include <unistd.h>
+#include <iostream>
 
 /* Includes, cuda */
 #include <cublas_v2.h>
@@ -45,8 +46,6 @@
 
 /* Matrix size */
 #define N (8192)
-#define REPEAT (88)
-#define SHIFTS (1)
 
 /* Main */
 int main(int argc, char **argv) {
@@ -71,6 +70,33 @@ int main(int argc, char **argv) {
   if (dev == -1) {
     return EXIT_FAILURE;
   }
+
+  // Variables to store the values of flags
+  int REPEAT = 1;
+  int SHIFTS = 1;
+
+  // Parsing command line arguments
+  for (int i = 1; i < argc; ++i) {
+      if (strcmp(argv[i], "-r") == 0) {
+          if (i + 1 < argc) { // Ensure there is an argument to consume
+              REPEAT = std::atoi(argv[++i]); // Increment 'i' to skip next argument
+          } else {
+              std::cerr << "Error: Option '-r' requires an integer value." << std::endl;
+              return EXIT_FAILURE;
+          }
+      } else if (strcmp(argv[i], "-s") == 0) {
+          if (i + 1 < argc) { // Ensure there is an argument to consume
+              SHIFTS = std::atoi(argv[++i]); // Increment 'i' to skip next argument
+          } else {
+              std::cerr << "Error: Option '-s' requires an integer value." << std::endl;
+              return EXIT_FAILURE;
+          }
+      }
+  }
+
+  // Use rValue and sValue in your program as needed
+  // std::cout << "Value of -r: " << REPEAT << std::endl;
+  // std::cout << "Value of -s: " << SHIFTS << std::endl;
 
   /* Initialize CUBLAS */
   // printf("simpleCUBLAS test running..\n");

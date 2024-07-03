@@ -4,10 +4,17 @@ import time
 import numpy
 import torch
 from torchvision.models.detection import retinanet_resnet50_fpn, RetinaNet_ResNet50_FPN_Weights
+import argparse
 
 def main():
-    REPEAT = 32
-    SHIFTS = 1
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-r', '--repeat', type=int)
+    parser.add_argument('-s', '--shifts', type=int)
+
+    args = parser.parse_args()
+
+    REPEAT = args.repeat
+    SHIFTS = args.shifts
 
     torch.hub.set_dir('.')
 

@@ -4,6 +4,7 @@
 #include <vector>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
 #include <stdio.h>
 #include <unistd.h>
@@ -185,6 +186,7 @@ int main(int argc, const char **argv) {
     } else if (experiment == 2) {  // Run a executable and take the measurements
         getline(ss, token, ','); std::string path = token;
         getline(ss, token, ','); std::string executable = token;
+        std::replace(executable.begin(), executable.end(), '_', ' ');
 
         std::string cmd = "(cd " + path + " && " + executable + ")";
         // std::cout << "Running the executable: " << cmd << std::endl;

@@ -58,12 +58,33 @@ extern "C" void inverseCNDgpu(float *d_Output, unsigned int *d_Input,
                               unsigned int N);
 
 const int N = 10485760;
-#define REPEAT 7304
-#define SHIFTS 1
 
 int main(int argc, char **argv) {
   // Start logs
   // printf("%s Starting...\n\n", argv[0]);
+
+  // Variables to store the values of flags
+  int REPEAT = 1;
+  int SHIFTS = 1;
+
+  // Parsing command line arguments
+  for (int i = 1; i < argc; ++i) {
+      if (strcmp(argv[i], "-r") == 0) {
+          if (i + 1 < argc) { // Ensure there is an argument to consume
+              REPEAT = std::atoi(argv[++i]); // Increment 'i' to skip next argument
+          } else {
+              std::cerr << "Error: Option '-r' requires an integer value." << std::endl;
+              return EXIT_FAILURE;
+          }
+      } else if (strcmp(argv[i], "-s") == 0) {
+          if (i + 1 < argc) { // Ensure there is an argument to consume
+              SHIFTS = std::atoi(argv[++i]); // Increment 'i' to skip next argument
+          } else {
+              std::cerr << "Error: Option '-s' requires an integer value." << std::endl;
+              return EXIT_FAILURE;
+          }
+      }
+  }
 
   unsigned int tableCPU[QRNG_DIMENSIONS][QRNG_RESOLUTION];
 

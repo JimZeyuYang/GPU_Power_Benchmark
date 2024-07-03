@@ -27,7 +27,7 @@ class GPU_pwr_benchmark:
         self.sw_meas = sw_meas
         self.gpu_id = gpu_id
         self.PMD = PMD
-        self.aliasing_ratios = [1/2, 2/3, 4/5, 6/5, 4/3]
+        self.aliasing_ratios = [1/2, 2/3, 3/4, 4/5, 6/5, 5/4, 4/3]
         self.pwr_draw_options = {
             'power.draw': False,
             'power.draw.average': False,
@@ -64,10 +64,10 @@ class GPU_pwr_benchmark:
 
         if not os.path.exists('/tmp'): os.makedirs('/tmp')
         self._recompile_load()
-        self._warm_up()
 
-        self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
-        self.pwr_update_freq = self._find_pwr_update_freq()
+        # self._warm_up()
+        # self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
+        # self.pwr_update_freq = self._find_pwr_update_freq()
     
     def _log(self, message, end='\n'):
         with open(self.log_file, 'a') as f:
@@ -354,15 +354,12 @@ class GPU_pwr_benchmark:
             self._log('Running experiment 1: Steady state and transient response analysis...')
 
             os.makedirs(os.path.join(self.result_dir, 'Experiment_1'))
-            percentage_list = [100]
-            for percentage in percentage_list:
-            # for percentage in range(0, 101, 20):
+            for percentage in range(0, 101, 20):
                 print(f'  Running experiment with {percentage}% load...')
                 self._log(f'  Running experiment with {percentage}% load...')
                 # create the store path
                 percentage_store_path = os.path.join(self.result_dir, 'Experiment_1', f'{percentage}%_load')
                 os.makedirs(percentage_store_path)
-                # scale_gradient, scale_intercept = self._find_scale_parameter(percentage_store_path, percentage)
 
                 for rep in range(int(self.repetitions/4)):
                     print(f'    Repetition {rep+1} of {int(self.repetitions/4)}...')
@@ -522,9 +519,9 @@ class GPU_pwr_benchmark:
 
             # create a dictionary of the test name and executable command
             tests_dict = {
-                '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,1'},
-                '1.00_period'   : {'reps' : 56,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},56,1'},
-                '8.00_period'   : {'reps' : 32,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},32,1'},
+                # '0.25_period'   : {'reps' : 200,   'config' : f'{int(self.pwr_update_freq/8)},{int(self.pwr_update_freq/8 * self.scale_gradient + self.scale_intercept)},200,1'},
+                # '1.00_period'   : {'reps' : 56,    'config' : f'{int(self.pwr_update_freq/2)},{int(self.pwr_update_freq/2 * self.scale_gradient + self.scale_intercept)},56,1'},
+                # '8.00_period'   : {'reps' : 32,    'config' : f'{int(self.pwr_update_freq*4)},{int(self.pwr_update_freq*4 * self.scale_gradient + self.scale_intercept)},32,1'},
                 'cublas_sgemm'  : {'reps' : 88,   'config' : 'tests/simpleCUBLAS/,./simpleCUBLAS'},
                 'cufft'         : {'reps' : 304,   'config' : 'tests/simpleCUFFT/,./simpleCUFFT'},
                 'nvJPEG'        : {'reps' : 40,    'config' : 'tests/nvJPEG/,./nvJPEG'},
@@ -542,22 +539,34 @@ class GPU_pwr_benchmark:
             for i, (test_name, value) in enumerate(tests_dict.items()):
                 print(f'  Measuring energy for test: {test_name} ', end='', flush=True)
 
-                if i < 3: exp = 3
+                # if test_name contains period, then it is a periodic test
+                if 'period' in test_name: exp = 3
                 else    : exp = 2
 
                 # create a folder for the test
                 test_store_path = os.path.join(self.result_dir, 'Experiment_5', test_name)
                 os.makedirs(test_store_path)
+                naive_path = os.path.join(test_store_path, 'naive')
+                os.makedirs(naive_path)
+                correct_path = os.path.join(test_store_path, 'correct')
+                os.makedirs(correct_path)
 
                 num_repetitions = 4
+                
                 for rep in range(num_repetitions):
-                    print('.', end='', flush=True)
-                    # create a folder for the repetition
-                    rep_store_path = os.path.join(test_store_path, f'rep_{rep}')
+                    rep_store_path = os.path.join(naive_path, f'rep_{rep}')
                     os.makedirs(rep_store_path)
 
-                    if rep == 0:  self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
-                    self._run_benchmark(exp, value['config'], rep_store_path, delay=False)
+                    if rep == 0:  self._run_benchmark(exp, f"{value['config']}_-r_1_-s_1", rep_store_path, delay=False)
+                    self._run_benchmark(exp, f"{value['config']}_-r_1_-s_1", rep_store_path, delay=False)
+                    time.sleep(random.random())
+
+                for rep in range(num_repetitions):
+                    rep_store_path = os.path.join(correct_path, f'rep_{rep}')
+                    os.makedirs(rep_store_path)
+
+                    if rep == 0:  self._run_benchmark(exp, f"{value['config']}_-r_{value['reps']}_-s_4", rep_store_path, delay=False)
+                    self._run_benchmark(exp, f"{value['config']}_-r_{value['reps']}_-s_4", rep_store_path, delay=False)
                     time.sleep(random.random())
 
                 print(' Done!')
@@ -784,7 +793,7 @@ class GPU_pwr_benchmark:
 
                     # plot the points and the linear regression line
                     fig, ax = plt.subplots(nrows=1, ncols=1)
-                    print(pwr_pair)
+                    # print(pwr_pair)
                     ax.plot(pwr_pair[1], pwr_pair[0], '+', markersize=12, label='Steady state power draw')
                     x = np.linspace(0, max(pwr_pair[1]), 100)
                     y = gradient * x + intercept
@@ -2027,22 +2036,30 @@ class GPU_pwr_benchmark:
         
         for test in tests_list:
             print(f'Processing test: {test}')
-            args = []
-            reps_list = os.listdir(os.path.join(result_dir, test))
-            reps_list.sort(key=lambda x: int(x.split('_')[-1]))
-            for reps in reps_list:
-                args.append(os.path.join(result_dir, test, reps))
 
             naive_energy_list = []
-            correct_energy_list = []
+            correct_energy_list = []            
+
+            args = []
+            reps_list = os.listdir(os.path.join(result_dir, test, 'naive'))
+            reps_list.sort(key=lambda x: int(x.split('_')[-1]))
+            for r in reps_list:  args.append(os.path.join(result_dir, test, 'naive', r))
             for arg in args:
                 reps = int(tests_dict[test]['reps'])
-                naive_energy, correct_energy = self._exp_5_process_single_run(arg, reps)
-
+                naive_energy, _ = self._exp_5_process_single_run(arg, reps)
                 naive_energy_list.append(naive_energy)
+                print(f'  rep: {arg.split("_")[-1]}    naive energy: {naive_energy:.6f} J')
+
+            args = []
+            reps_list = os.listdir(os.path.join(result_dir, test, 'correct'))
+            reps_list.sort(key=lambda x: int(x.split('_')[-1]))
+            for r in reps_list:  args.append(os.path.join(result_dir, test, 'correct', r))
+            for arg in args:
+                reps = int(tests_dict[test]['reps'])
+                _, correct_energy = self._exp_5_process_single_run(arg, reps)
                 correct_energy_list.append(correct_energy)
-                print(f'  rep: {arg.split("_")[-1]}    naive energy: {naive_energy:.6f} J    correct energy: {correct_energy:.6f} J')
-            
+                print(f'  rep: {arg.split("_")[-1]}    correct energy: {correct_energy:.6f} J')
+
             naive_energy_avg = np.mean(naive_energy_list)
             correct_energy_avg = np.mean(correct_energy_list)
 
@@ -2095,7 +2112,7 @@ class GPU_pwr_benchmark:
             # create the power data frame
             t = np.concatenate((np.array([start_ts]), power_window.index.to_numpy(), np.array([end_ts])))
             p = np.concatenate((np.array([lb_p]), power_window[power_option].to_numpy(), np.array([ub_p])))
-            naive_energy += np.trapz(p, t) / 1000 / (num_reps / num_shifts)
+            naive_energy += np.trapz(p, t) / 1000
 
             ########################################################################
             duration = (end_ts - start_ts) / (num_reps / num_shifts)
@@ -2124,8 +2141,6 @@ class GPU_pwr_benchmark:
                 correct_energy += np.trapz(p, t) / 1000 / (num_reps / num_shifts - reps_to_ignore)
 
         
-
-
         return naive_energy / num_shifts, correct_energy / num_shifts
 
 class stride_gen:
