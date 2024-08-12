@@ -65,9 +65,9 @@ class GPU_pwr_benchmark:
         if not os.path.exists('/tmp'): os.makedirs('/tmp')
         self._recompile_load()
 
-        # self._warm_up()
-        # self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
-        # self.pwr_update_freq = self._find_pwr_update_freq()
+        self._warm_up()
+        self.scale_gradient, self.scale_intercept = self._find_scale_parameter()
+        self.pwr_update_freq = self._find_pwr_update_freq()
     
     def _log(self, message, end='\n'):
         with open(self.log_file, 'a') as f:
