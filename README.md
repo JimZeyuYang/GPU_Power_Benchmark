@@ -1,4 +1,5 @@
 # GPU Power Microbenchmark
+[![DOI](https://zenodo.org/badge/632467691.svg)](https://zenodo.org/doi/10.5281/zenodo.13313030)
 
 Microbenchmark that unveals the mechanisms behind power readings reported by nvidia-smi/MVML on your NVIDIA GPU.
 
