@@ -60,13 +60,28 @@ Result processing is parallelised. Multi core CPUs will greatly speed up result 
 
 On Ubuntu 22.04, to grant access to serial port (if PMD is present), run
 ```bash
-  sudo apt remove brltty
-  sudo usermod -aG dialout <username>
+sudo apt remove brltty
+sudo usermod -aG dialout <username>
 ```
 
 
 ## Support
 For questions and support please email zeyu.yang@eng.ox.ac.uk.
+
+## Reference
+
+If you use our work in a scientific publication, we would appreciate using the following citation:
+```
+@inproceedings{yang2024accurate,
+  title={Accurate and Convenient Energy Measurements for GPUs: A Detailed Study of NVIDIA GPU’s Built-In Power Sensor},
+  author={Yang, Zeyu and Adamek, Karel and Armour, Wesley},
+  booktitle={2024 SC24: International Conference for High Performance Computing, Networking, Storage and Analysis SC},
+  pages={307--323},
+  year={2024},
+  organization={IEEE Computer Society}
+}
+```
+
 
 ## License
 
